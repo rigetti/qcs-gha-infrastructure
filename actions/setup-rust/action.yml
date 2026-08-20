@@ -1,0 +1,69 @@
+name: Setup Rust
+description: Install a Rust toolchain via rustup and restore the cargo/target cache.
+
+inputs:
+  toolchain:
+    description: Rust toolchain to install (e.g. stable, 1.85, nightly).
+    required: false
+    default: stable
+  components:
+    description: Space-separated rustup components (e.g. "clippy rustfmt").
+    required: false
+    default: ""
+  targets:
+    description: Space-separated rustup target triples to add.
+    required: false
+    default: ""
+  cache:
+    description: Whether to restore/save the cargo and target caches.
+    required: false
+    default: "true"
+  cache-key:
+    description: Extra discriminator appended to the cache key, so unrelated jobs do not share a cache.
+    required: false
+    default: default
+
+runs:
+  using: composite
+  steps:
+    - name: Install toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain none --profile minimal
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          export PATH="${HOME}/.cargo/bin:${PATH}"
+        fi
+        rustup toolchain install '${{ inputs.toolchain }}' --profile minimal --no-self-update
+        rustup default '${{ inputs.toolchain }}'
+        for component in ${{ inputs.components }}; do
+          rustup component add --toolchain '${{ inputs.toolchain }}' "${component}"
+        done
+        for target in ${{ inputs.targets }}; do
+          rustup target add --toolchain '${{ inputs.toolchain }}' "${target}"
+        done
+        rustc --version
+        cargo --version
+
+    - name: Configure cargo for CI
+      shell: bash
+      run: |
+        echo "CARGO_TERM_COLOR=always" >> "${GITHUB_ENV}"
+        echo "CARGO_INCREMENTAL=0" >> "${GITHUB_ENV}"
+        echo "RUSTUP_TOOLCHAIN=${{ inputs.toolchain }}" >> "${GITHUB_ENV}"
+
+    - name: Cache cargo registry and build artifacts
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          target
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ inputs.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ inputs.cache-key }}-
+          cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-

@@ -1,0 +1,46 @@
+name: Knope release
+
+# Reusable workflow: run knope's `release` workflow, which bumps versions,
+# updates the changelog, commits, tags, and pushes.
+on:
+  workflow_call:
+    inputs:
+      knope-version:
+        type: string
+        required: false
+        default: "0.23.0"
+      git-user-name:
+        type: string
+        required: false
+        default: github-actions[bot]
+      git-user-email:
+        type: string
+        required: false
+        default: 41898282+github-actions[bot]@users.noreply.github.com
+    secrets:
+      token:
+        description: >-
+          Token used to push the release commit/tag and create the GitHub
+          release. Use a PAT or app token if the release push must trigger
+          further workflows; GITHUB_TOKEN pushes do not.
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.token }}
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-knope@main
+        with:
+          version: ${{ inputs.knope-version }}
+      - name: Configure git identity
+        run: |
+          git config user.name '${{ inputs.git-user-name }}'
+          git config user.email '${{ inputs.git-user-email }}'
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.token }}
+        run: knope release

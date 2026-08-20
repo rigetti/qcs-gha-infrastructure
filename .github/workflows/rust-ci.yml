@@ -1,0 +1,70 @@
+name: Rust CI
+
+# Reusable workflow: formatting, lints, and tests for a Rust crate.
+# See README.md for usage.
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: Rust toolchain to use.
+        type: string
+        required: false
+        default: stable
+      runs-on:
+        description: Runner label for all jobs.
+        type: string
+        required: false
+        default: ubuntu-latest
+      test-command:
+        description: Command used to run the test suite.
+        type: string
+        required: false
+        default: cargo nextest run
+      clippy-args:
+        description: Extra arguments passed to `cargo clippy`.
+        type: string
+        required: false
+        default: --all-targets
+      install-nextest:
+        description: Install cargo-nextest before running tests.
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  fmt:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: rustfmt
+          cache: "false"
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: clippy
+          cache-key: clippy
+      - run: cargo clippy ${{ inputs.clippy-args }} -- --deny warnings
+
+  test:
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          cache-key: test
+      - name: Install cargo-nextest
+        if: inputs.install-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: ${{ inputs.test-command }}
