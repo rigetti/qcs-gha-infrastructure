@@ -1,0 +1,21 @@
+name: Self test
+
+# Exercises the actions in this repository against this repository, so a broken
+# action is caught here rather than in a consumer's CI.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  todo-curator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./actions/todo-curator
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}

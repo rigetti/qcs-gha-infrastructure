@@ -1,0 +1,100 @@
+name: Run todo-curator
+description: >-
+  Install todo-curator from its GitHub releases with ubi and check this
+  repository's TODO comments against issue and merge-request status.
+
+inputs:
+  version:
+    description: >-
+      Release tag of todo-curator to install. Pinned by default: ubi installs
+      the latest release when no tag is given, which turns an upstream release
+      into a surprise CI change.
+    required: false
+    default: v0.1.12
+  command:
+    description: >-
+      todo-curator subcommand to run: check-all, check-closed, check-invalid,
+      check-mr-todos, or validate-auth. Set to an empty string to install
+      without running anything.
+    required: false
+    default: check-all
+  args:
+    description: Extra arguments appended to the subcommand, e.g. --format json.
+    required: false
+    default: ""
+  path:
+    description: Directory to scan.
+    required: false
+    default: "."
+  exclude-file-regex:
+    description: >-
+      Regex of files to skip. Note that this is a single regex, not a list.
+      Repositories whose own test fixtures contain TODO-shaped strings need
+      this, or the checks will flag their fixtures.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Token used both to resolve GitHub issue references and to fetch releases
+      from the GitHub API. Unauthenticated API access is rate limited to as few
+      as 60 requests per hour per IP, so ubi needs this in CI as much as
+      todo-curator does. `${{ secrets.GITHUB_TOKEN }}` is enough unless the
+      referenced issues live in other repositories.
+    required: false
+    default: ""
+  gitlab-token:
+    description: Token used to resolve GitLab issue, merge-request, and epic references.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # The bootstrap script is what upstream recommends for CI. It installs into
+    # ./bin relative to the working directory, so give it a directory of its
+    # own rather than dropping a bin/ into the checkout.
+    - name: Install ubi
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/ubi"
+        cd "${RUNNER_TEMP}/ubi"
+        curl --silent --location \
+          https://raw.githubusercontent.com/houseabsolute/ubi/master/bootstrap/bootstrap-ubi.sh | sh
+        echo "${RUNNER_TEMP}/ubi/bin" >> "${GITHUB_PATH}"
+
+    - name: Install todo-curator
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        ubi --project rigetti/todo-curator \
+            --tag '${{ inputs.version }}' \
+            --exe todo-curator \
+            --in "${RUNNER_TEMP}/ubi/bin"
+        todo-curator --version
+
+    - name: Run todo-curator
+      if: inputs.command != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        GITLAB_TOKEN: ${{ inputs.gitlab-token }}
+        EXCLUDE: ${{ inputs.exclude-file-regex }}
+      run: |
+        set -euo pipefail
+        # Passed as a flag rather than TODO_CURATOR_EXCLUDE_FILE_REGEX so that
+        # an unset input means "no filter" instead of "an empty regex".
+        opts=()
+        # validate-auth takes neither of these.
+        if [[ '${{ inputs.command }}' == check-* ]]; then
+          opts+=(--path '${{ inputs.path }}')
+          if [[ -n "${EXCLUDE}" ]]; then
+            opts+=(--exclude-file-regex "${EXCLUDE}")
+          fi
+        fi
+        todo-curator ${{ inputs.command }} "${opts[@]}" ${{ inputs.args }}
