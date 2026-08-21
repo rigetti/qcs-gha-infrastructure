@@ -1,5 +1,7 @@
 name: Setup Rust
-description: Install a Rust toolchain via rustup and restore the cargo/target cache.
+description: >-
+  Install a Rust toolchain via rustup and set up compilation caching, either
+  through sccache (default) or by caching the target directory.
 
 inputs:
   toolchain:
@@ -15,13 +17,28 @@ inputs:
     required: false
     default: ""
   cache:
-    description: Whether to restore/save the cargo and target caches.
+    description: >-
+      Whether to cache anything at all. Set to "false" for untrusted code, so
+      that its build products never reach a cache a later run can read.
     required: false
     default: "true"
   cache-key:
     description: Extra discriminator appended to the cache key, so unrelated jobs do not share a cache.
     required: false
     default: default
+  sccache:
+    description: >-
+      Use sccache as the compiler wrapper. sccache stores individual
+      compilation units in the GitHub Actions cache service — the same backing
+      store as actions/cache — which shares far better across branches and
+      lockfile changes than a whole-target-directory cache. When enabled, only
+      the cargo registry is cached directly; the target directory is not.
+    required: false
+    default: "true"
+  sccache-version:
+    description: Version of mozilla-actions/sccache-action's sccache binary; empty means the action's default.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -54,15 +71,34 @@ runs:
         echo "CARGO_INCREMENTAL=0" >> "${GITHUB_ENV}"
         echo "RUSTUP_TOOLCHAIN=${{ inputs.toolchain }}" >> "${GITHUB_ENV}"
 
-    - name: Cache cargo registry and build artifacts
+    # sccache's `gha` backend writes to the GitHub Actions cache service, the
+    # same store actions/cache uses, so no external cache infrastructure is
+    # needed. CARGO_INCREMENTAL=0 above is a prerequisite: incremental
+    # artifacts are not cacheable, and sccache skips those units entirely.
+    - name: Install sccache
+      if: inputs.cache == 'true' && inputs.sccache == 'true'
+      uses: mozilla-actions/sccache-action@v0.0.11
+      with:
+        version: ${{ inputs.sccache-version }}
+
+    - name: Enable sccache
+      if: inputs.cache == 'true' && inputs.sccache == 'true'
+      shell: bash
+      run: |
+        echo "SCCACHE_GHA_ENABLED=true" >> "${GITHUB_ENV}"
+        echo "RUSTC_WRAPPER=sccache" >> "${GITHUB_ENV}"
+
+    - name: Cache cargo registry
       if: inputs.cache == 'true'
       uses: actions/cache@v4
       with:
+        # The target directory is only worth caching without sccache; with it,
+        # compilation units come back from the sccache entries instead.
         path: |
           ~/.cargo/registry/index
           ~/.cargo/registry/cache
           ~/.cargo/git/db
-          target
+          ${{ inputs.sccache != 'true' && 'target' || '' }}
         key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ inputs.cache-key }}-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ inputs.cache-key }}-

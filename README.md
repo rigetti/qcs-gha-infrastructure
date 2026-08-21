@@ -1,14 +1,12 @@
 # qcs-gha-infrastructure
 
-Shared GitHub Actions and reusable workflows for QCS repositories. This is the
-GitHub Actions counterpart to the GitLab CI templates in
-`rigetti/qcs/utilities/qcs-infrastructure`.
+Shared GitHub Actions and reusable workflows for QCS repositories.
 
 ## Composite actions
 
 ### `actions/setup-rust`
 
-Installs a Rust toolchain with rustup and restores the cargo/target cache.
+Installs a Rust toolchain with rustup and sets up compilation caching.
 
 ```yaml
 - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
@@ -16,9 +14,29 @@ Installs a Rust toolchain with rustup and restores the cargo/target cache.
     toolchain: stable        # optional
     components: clippy       # optional, space-separated
     targets: x86_64-unknown-linux-musl  # optional, space-separated
-    cache: "true"            # optional
+    cache: "true"            # optional; "false" for untrusted code
     cache-key: clippy        # optional cache discriminator
+    sccache: "true"          # optional; "false" caches ./target instead
 ```
+
+**Caching.** By default this installs
+[sccache](https://github.com/mozilla/sccache) via
+`mozilla-actions/sccache-action` and sets `RUSTC_WRAPPER=sccache` with
+`SCCACHE_GHA_ENABLED=true`. That is sccache's `gha` backend, which stores each
+compilation unit in **GitHub's own Actions cache service** — the same backing
+store `actions/cache` writes to, so there is no external cache infrastructure
+to run. The win over caching `./target` wholesale is granularity: a single
+dependency bump or a branch that diverges invalidates a target-directory
+archive completely, while sccache still hits on every unit whose inputs did not
+change. The action also sets `CARGO_INCREMENTAL=0`, which sccache requires —
+incremental artifacts are not cacheable.
+
+With sccache on, only the cargo registry is cached directly. Set
+`sccache: "false"` to fall back to caching `./target`.
+
+Both paths respect `cache: "false"`, which disables caching entirely — use that
+when building untrusted code, so its artifacts never land in a cache that a
+later trusted run would read.
 
 ### `actions/setup-knope`
 
