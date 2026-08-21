@@ -16,23 +16,37 @@ Installs a Rust toolchain with rustup and sets up compilation caching.
     targets: x86_64-unknown-linux-musl  # optional, space-separated
     cache: "true"            # optional; "false" for untrusted code
     cache-key: clippy        # optional cache discriminator
-    sccache: "true"          # optional; "false" caches ./target instead
+    sccache: "false"         # optional; see the caching notes below
 ```
 
-**Caching.** By default this installs
+**Caching.** By default this caches the cargo registry and `./target` with
+`actions/cache`.
+
+Setting `sccache: "true"` instead installs
 [sccache](https://github.com/mozilla/sccache) via
 `mozilla-actions/sccache-action` and sets `RUSTC_WRAPPER=sccache` with
-`SCCACHE_GHA_ENABLED=true`. That is sccache's `gha` backend, which stores each
-compilation unit in **GitHub's own Actions cache service** — the same backing
-store `actions/cache` writes to, so there is no external cache infrastructure
-to run. The win over caching `./target` wholesale is granularity: a single
-dependency bump or a branch that diverges invalidates a target-directory
-archive completely, while sccache still hits on every unit whose inputs did not
-change. The action also sets `CARGO_INCREMENTAL=0`, which sccache requires —
-incremental artifacts are not cacheable.
+`SCCACHE_GHA_ENABLED=true`. To answer the obvious question: yes, sccache's
+`gha` backend is **GitHub's own Actions cache service** under the hood — the
+same backing store `actions/cache` writes to, reported as
+`Cache location  ghac, …` in the post-run stats. There is no external cache
+infrastructure to run. In principle its granularity beats a target-directory
+archive, which one dependency bump invalidates wholesale. `CARGO_INCREMENTAL=0`
+is set either way, which sccache requires.
 
-With sccache on, only the cargo registry is cached directly. Set
-`sccache: "false"` to fall back to caching `./target`.
+In practice, measured on `todo-curator` (sccache 0.17.0, four platforms):
+
+| | target-dir cache | sccache |
+|---|---|---|
+| `clippy` | 72s | 108s |
+| `test` | 102s | 119s |
+| integration jobs | 36–49s | 123–130s |
+
+Hit rate was **0%** across repeat runs of identical code, with ~151 `Cache write
+errors` per job against 194 successful writes. Two things contribute: sccache
+cannot cache `cargo check` or `clippy` at all (they only emit metadata), and
+whatever is failing those writes also prevents reuse in the full builds. So this
+is off by default, and worth revisiting for build-dominated jobs only — check
+the post-run stats block rather than assuming it helps.
 
 Both paths respect `cache: "false"`, which disables caching entirely — use that
 when building untrusted code, so its artifacts never land in a cache that a

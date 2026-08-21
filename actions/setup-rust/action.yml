@@ -28,13 +28,18 @@ inputs:
     default: default
   sccache:
     description: >-
-      Use sccache as the compiler wrapper. sccache stores individual
-      compilation units in the GitHub Actions cache service — the same backing
-      store as actions/cache — which shares far better across branches and
-      lockfile changes than a whole-target-directory cache. When enabled, only
-      the cargo registry is cached directly; the target directory is not.
+      Use sccache as the compiler wrapper, storing individual compilation units
+      in the GitHub Actions cache service. When enabled, the target directory is
+      not cached, since sccache is meant to replace it.
+
+      Defaults to "false": measured on todo-curator, sccache produced a 0% hit
+      rate with ~150 cache write errors per job, and jobs ran 1.5-3x SLOWER than
+      with a plain target-directory cache. It also cannot cache `cargo
+      check`/`clippy` at all, which only emit metadata. Try it on
+      build-dominated jobs and read the stats in the post-run step before
+      trusting it.
     required: false
-    default: "true"
+    default: "false"
   sccache-version:
     description: Version of mozilla-actions/sccache-action's sccache binary; empty means the action's default.
     required: false
