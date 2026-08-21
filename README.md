@@ -77,6 +77,30 @@ jobs:
       test-command: cargo nextest run --all-features
 ```
 
+### `rust-cli-build.yml`
+
+Builds a release binary per platform and uploads each as an artifact named
+`release-<target>` holding `<bin>-<target>`. Defaults to musl Linux on both
+architectures, arm64 macOS, and x86_64 Windows.
+
+```yaml
+jobs:
+  build:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@main
+    with:
+      bin: my-cli
+      # Optional; override to add or drop platforms.
+      matrix: |
+        [
+          {"runs-on": "ubuntu-latest", "target": "x86_64-unknown-linux-musl"},
+          {"runs-on": "macos-14",      "target": "aarch64-apple-darwin"}
+        ]
+```
+
+`musl-tools` is installed and `CC_<target>` set automatically for musl targets.
+`CARGO_TARGET_DIR` is moved under `RUNNER_TEMP` so deep dependency trees do not
+overrun Windows' path limit.
+
 ### `rust-integration-tests.yml`
 
 Runs a test command that needs credentials, optionally under a GitHub

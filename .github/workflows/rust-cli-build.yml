@@ -1,0 +1,85 @@
+name: Rust CLI build
+
+# Reusable workflow: build a release binary per platform and upload each one as
+# an artifact named `release-<target>`, containing `<bin>-<target>`.
+#
+# Callers attach the artifacts to a release themselves; see
+# todo-curator's cli-release.yml.
+on:
+  workflow_call:
+    inputs:
+      bin:
+        description: Name of the binary to build, as `cargo build -p` expects it.
+        type: string
+        required: true
+      matrix:
+        description: >-
+          JSON array of `{"runs-on": …, "target": …}` objects. Defaults to musl
+          Linux on both architectures, arm64 macOS, and x86_64 Windows.
+        type: string
+        required: false
+        default: |
+          [
+            {"runs-on": "ubuntu-latest",    "target": "x86_64-unknown-linux-musl"},
+            {"runs-on": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-musl"},
+            {"runs-on": "macos-14",         "target": "aarch64-apple-darwin"},
+            {"runs-on": "windows-latest",   "target": "x86_64-pc-windows-msvc"}
+          ]
+      toolchain:
+        type: string
+        required: false
+        default: stable
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.runs-on }}
+    env:
+      # Keep the path short: deep dependency trees overrun Windows' path limit
+      # when building inside the workspace.
+      CARGO_TARGET_DIR: ${{ runner.temp }}/t
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          targets: ${{ matrix.target }}
+          # A release build happens once per release; a cache would mostly be a
+          # cold miss, and CARGO_TARGET_DIR is outside the cached path anyway.
+          cache: "false"
+
+      - name: Install musl toolchain
+        if: endsWith(matrix.target, '-linux-musl')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          echo "CC_$(echo '${{ matrix.target }}' | tr - _)=musl-gcc" >> "${GITHUB_ENV}"
+
+      - name: Build
+        shell: bash
+        run: cargo build -p '${{ inputs.bin }}' --target '${{ matrix.target }}' --release
+
+      - name: Stage the binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          ext=""
+          [[ '${{ matrix.target }}' == *windows* ]] && ext=".exe"
+          cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/${{ inputs.bin }}${ext}" \
+             "release/${{ inputs.bin }}-${{ matrix.target }}${ext}"
+          chmod +x release/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release/
+          if-no-files-found: error
