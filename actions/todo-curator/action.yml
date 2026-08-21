@@ -50,20 +50,20 @@ inputs:
 runs:
   using: composite
   steps:
-    # The bootstrap script is what upstream recommends for CI. It installs into
-    # ./bin relative to the working directory, so give it a directory of its
-    # own rather than dropping a bin/ into the checkout.
+    # The bootstrap script is what upstream recommends for CI. TARGET must
+    # already exist — the script will not create it — and keeping it under
+    # RUNNER_TEMP avoids dropping a bin/ into the checkout.
     - name: Install ubi
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
-        mkdir -p "${RUNNER_TEMP}/ubi"
-        cd "${RUNNER_TEMP}/ubi"
+        export TARGET="${RUNNER_TEMP}/ubi/bin"
+        mkdir -p "${TARGET}"
         curl --silent --location \
           https://raw.githubusercontent.com/houseabsolute/ubi/master/bootstrap/bootstrap-ubi.sh | sh
-        echo "${RUNNER_TEMP}/ubi/bin" >> "${GITHUB_PATH}"
+        echo "${TARGET}" >> "${GITHUB_PATH}"
 
     - name: Install todo-curator
       shell: bash
