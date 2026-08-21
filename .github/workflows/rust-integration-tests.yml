@@ -46,6 +46,14 @@ on:
         type: string
         required: false
         default: integration
+      cache:
+        description: >-
+          Whether to restore and save the cargo/target cache. Set this to false
+          when `ref` is untrusted code: a cache written by a fork's build is
+          visible to later runs on the base branch.
+        type: boolean
+        required: false
+        default: true
     secrets:
       github-api-token:
         description: Token exposed to the test command as GH_TOKEN.
@@ -70,6 +78,7 @@ jobs:
         with:
           toolchain: ${{ inputs.toolchain }}
           cache-key: ${{ inputs.cache-key }}
+          cache: ${{ inputs.cache }}
       - name: Run integration tests
         env:
           GH_TOKEN: ${{ secrets.github-api-token }}
