@@ -1,0 +1,77 @@
+name: Rust integration tests
+
+# Reusable workflow: run a test command that needs credentials.
+#
+# Callers are expected to invoke this twice — once for trusted code (no
+# environment, so no approval prompt) and once for pull requests from forks,
+# passing an `environment` whose protection rules require a maintainer's
+# approval. Secrets are never available to `pull_request` runs from forks, so
+# the fork-facing caller must be triggered by `pull_request_target` and pass
+# the pull request's head SHA as `ref`.
+#
+# SECURITY: when `ref` points at untrusted code, the approving reviewer is the
+# only thing standing between a fork's contents and these secrets. Read the
+# diff — including build scripts, macros, and test fixtures — before approving.
+on:
+  workflow_call:
+    inputs:
+      test-command:
+        description: Command that runs the credentialed tests.
+        type: string
+        required: true
+      ref:
+        description: >-
+          Git ref or SHA to check out. Defaults to the ref the workflow was
+          triggered on.
+        type: string
+        required: false
+        default: ""
+      environment:
+        description: >-
+          Name of the GitHub environment to run under. Leave empty to run
+          without one. Set this to an environment with required reviewers to
+          gate untrusted code behind manual approval.
+        type: string
+        required: false
+        default: ""
+      toolchain:
+        type: string
+        required: false
+        default: stable
+      runs-on:
+        type: string
+        required: false
+        default: ubuntu-latest
+      cache-key:
+        type: string
+        required: false
+        default: integration
+    secrets:
+      github-api-token:
+        description: Token exposed to the test command as GH_TOKEN.
+        required: false
+      gitlab-api-token:
+        description: Token exposed to the test command as GITLAB_TOKEN.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ${{ inputs.runs-on }}
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          cache-key: ${{ inputs.cache-key }}
+      - name: Run integration tests
+        env:
+          GH_TOKEN: ${{ secrets.github-api-token }}
+          GITLAB_TOKEN: ${{ secrets.gitlab-api-token }}
+        run: ${{ inputs.test-command }}

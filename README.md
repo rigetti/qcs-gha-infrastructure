@@ -45,6 +45,53 @@ jobs:
       test-command: cargo nextest run --all-features
 ```
 
+### `rust-integration-tests.yml`
+
+Runs a test command that needs credentials, optionally under a GitHub
+environment so that untrusted code waits for a maintainer's approval.
+
+Secrets — including environment secrets — are never passed to `pull_request`
+runs from forks, so credentialed tests cannot be approved into a fork PR on
+that trigger. Instead, call this workflow twice: once from `pull_request` /
+`push` for code that is already trusted, and once from `pull_request_target`
+for forks, passing an `environment` that has required reviewers.
+
+```yaml
+# .github/workflows/ci.yml — trusted code, runs immediately
+jobs:
+  integration:
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-integration-tests.yml@main
+    with:
+      test-command: cargo test --test api_integration_test --no-fail-fast
+    secrets:
+      github-api-token: ${{ secrets.MY_GH_TOKEN }}
+```
+
+```yaml
+# .github/workflows/integration-fork.yml — forks, gated on approval
+on:
+  pull_request_target:
+jobs:
+  integration:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-integration-tests.yml@main
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      environment: fork-integration-tests
+      test-command: cargo test --test api_integration_test --no-fail-fast
+    secrets:
+      github-api-token: ${{ secrets.MY_GH_TOKEN }}
+```
+
+Create the environment (Settings → Environments) with **Required reviewers**
+set. The job then waits for approval before checking out or running anything.
+
+**Security:** the fork-facing caller runs untrusted code with your secrets in
+scope once approved. The reviewer is the whole control. Read the diff — build
+scripts, proc macros, `Cargo.toml` patches, and test fixtures included — before
+approving, and pin the environment's reviewers to maintainers only.
+
 ### `knope-dry-run.yml`
 
 Verifies on pull requests that a release can be prepared.
