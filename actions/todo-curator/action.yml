@@ -16,6 +16,10 @@ inputs:
       todo-curator subcommand to run: check-all, check-closed, check-invalid,
       check-mr-todos, or validate-auth. Set to an empty string to install
       without running anything.
+
+      Note that check-all and check-closed currently initialize both forge
+      clients and fail without a GitLab token, even when the repository has no
+      GitLab references. check-invalid needs no credentials at all.
     required: false
     default: check-all
   args:
