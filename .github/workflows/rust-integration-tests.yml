@@ -56,7 +56,9 @@ on:
         default: true
     secrets:
       github-api-token:
-        description: Token exposed to the test command as GH_TOKEN.
+        description: >-
+          Token exposed to the test command as both GH_TOKEN and GITHUB_TOKEN,
+          since crates and CLIs disagree about which name to read.
         required: false
       gitlab-api-token:
         description: Token exposed to the test command as GITLAB_TOKEN.
@@ -82,5 +84,6 @@ jobs:
       - name: Run integration tests
         env:
           GH_TOKEN: ${{ secrets.github-api-token }}
+          GITHUB_TOKEN: ${{ secrets.github-api-token }}
           GITLAB_TOKEN: ${{ secrets.gitlab-api-token }}
         run: ${{ inputs.test-command }}
