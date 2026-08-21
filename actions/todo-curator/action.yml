@@ -38,7 +38,7 @@ inputs:
       Token used both to resolve GitHub issue references and to fetch releases
       from the GitHub API. Unauthenticated API access is rate limited to as few
       as 60 requests per hour per IP, so ubi needs this in CI as much as
-      todo-curator does. `${{ secrets.GITHUB_TOKEN }}` is enough unless the
+      todo-curator does. The job's own GITHUB_TOKEN secret is enough unless the
       referenced issues live in other repositories.
     required: false
     default: ""
