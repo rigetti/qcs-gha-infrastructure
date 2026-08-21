@@ -23,3 +23,6 @@ jobs:
           # even in a repository with no GitLab references, so the self-test
           # sticks to the check that needs no credentials.
           command: check-invalid
+          # This repository's docs discuss TODO comments in prose, which the
+          # checker reads as malformed references. Exercises the input, too.
+          exclude-file-regex: 'README\.md|actions/todo-curator/action\.yml'
