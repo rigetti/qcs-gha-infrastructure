@@ -150,15 +150,13 @@ approving, and pin the environment's reviewers to maintainers only.
 
 ### `prepare-release.yml`
 
-One workflow covering the whole knope release lifecycle. What it does depends on
-the event the caller was triggered by, so the caller wires up all three triggers
-and adds no conditions of its own:
+The automatic half of a knope release. Nothing to configure, and no way to run
+it by hand:
 
 | Caller's event | Behavior |
 |---|---|
 | `pull_request` | `knope release --dry-run`, so the PR shows what it would release |
-| `push` to the default branch | full release: bump, changelog, commit, tag, push |
-| `workflow_dispatch` | prerelease from the dispatched ref, labelled `rc` unless overridden |
+| `push` to the release branch | full release: bump, changelog, commit, tag, push |
 
 ```yaml
 name: Prepare release
@@ -167,6 +165,27 @@ on:
     branches: [main]
   push:
     branches: [main]
+
+jobs:
+  prepare-release:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-release.yml@main
+    secrets:
+      token: ${{ secrets.RELEASE_TOKEN }}
+```
+
+`token` must be a PAT or app token if the release push has to trigger anything
+downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
+new workflow runs.
+
+### `prepare-prerelease.yml`
+
+The manual half: cuts a release candidate from the branch it is dispatched on,
+so it can be installed and tested before merging. Wire it to
+`workflow_dispatch` only.
+
+```yaml
+name: Prepare prerelease
+on:
   workflow_dispatch:
     inputs:
       prerelease-label:
@@ -175,27 +194,20 @@ on:
         default: ""
 
 jobs:
-  prepare-release:
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-release.yml@main
+  prepare-prerelease:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-prerelease.yml@main
     with:
       prerelease-label: ${{ inputs.prerelease-label }}
     secrets:
       token: ${{ secrets.RELEASE_TOKEN }}
 ```
 
-Dispatching from a non-default branch cuts a prerelease tagged on that branch,
-which is what makes a release candidate testable before merging. `default-branch`
-(default `main`) decides which push is a full release; `knope-version` pins knope.
-
-**Dispatching on the default branch fails immediately, by design.** A push there
-already releases, so a manual run would duplicate or race it. GitHub offers every
-branch in the Run workflow dropdown with no way to restrict the list, so the
-workflow refuses the default branch in its first step — before checkout, and
-before any token is used.
-
-`token` must be a PAT or app token if the release push has to trigger anything
-downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
-new workflow runs.
+The tag lands on the dispatched branch. Dispatching from the release branch
+fails in the first step, before checkout: merging to it already releases, so a
+prerelease there would duplicate or race that. GitHub offers every branch in the
+Run workflow dropdown with no way to restrict the list, which is why this is a
+workflow-level check rather than configuration. `default-branch` (default
+`main`) names the branch to refuse.
 
 ## Versioning
 

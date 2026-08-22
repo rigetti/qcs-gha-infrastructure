@@ -1,0 +1,78 @@
+name: Prepare prerelease
+
+# Reusable workflow: cut a release candidate from the branch it is dispatched
+# on, so it can be tested before merging. Callers wire this to
+# workflow_dispatch only; the automatic dry-run-and-release half lives in
+# prepare-release.yml.
+on:
+  workflow_call:
+    inputs:
+      prerelease-label:
+        description: >-
+          Label for the prerelease, e.g. `beta` produces 1.2.3-beta.0. Defaults
+          to `rc`.
+        type: string
+        required: false
+        default: ""
+      knope-version:
+        type: string
+        required: false
+        default: "0.23.0"
+      default-branch:
+        description: >-
+          Branch that releases automatically, and which therefore cannot be
+          prereleased by hand.
+        type: string
+        required: false
+        default: main
+    secrets:
+      token:
+        description: >-
+          Token used to push the prerelease commit and tag and to publish the
+          prerelease. Must be a PAT or app token if the push needs to trigger
+          further workflows, such as a binary build: pushes made with
+          GITHUB_TOKEN do not start new runs.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      # GitHub offers every branch in the Run workflow dropdown and gives no way
+      # to restrict the list, so the default branch is refused here: pushing to
+      # it already releases, and a prerelease of it would duplicate or race that.
+      # This runs before checkout, so no token is used on the way to failing.
+      - name: Refuse the default branch
+        if: github.ref == format('refs/heads/{0}', inputs.default-branch)
+        run: |
+          echo "::error::${{ inputs.default-branch }} releases automatically when merged to; there is nothing to prerelease. Dispatch this from the branch you want a release candidate for."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Prerelease the dispatched branch, so its tag lands on that branch.
+          ref: ${{ github.ref }}
+          token: ${{ secrets.token }}
+
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-knope@main
+        with:
+          version: ${{ inputs.knope-version }}
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name '${{ github.triggering_actor }}'
+          git config --global user.email '${{ github.triggering_actor }}@users.noreply.github.com'
+
+      - name: Prerelease
+        env:
+          GITHUB_TOKEN: ${{ secrets.token }}
+          PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
+        run: |
+          set -euo pipefail
+          label="${PRERELEASE_LABEL:-rc}"
+          echo "Running prerelease with label '${label}' on ${GITHUB_REF}"
+          knope release --verbose "--prerelease-label=${label}"

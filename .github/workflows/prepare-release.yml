@@ -1,37 +1,19 @@
 name: Prepare release
 
-# Reusable workflow: knope-driven releases, with behavior determined by the
-# event the caller was triggered by.
+# Reusable workflow: the automatic half of a knope-driven release.
 #
-#   pull_request      dry run, so a PR shows what it would release
-#   push to main      full release: version bump, changelog, commit, tag, push
-#   workflow_dispatch prerelease from the dispatched ref, labelled `rc` unless
-#                     `prerelease-label` says otherwise
+#   pull_request   dry run, so a PR shows what it would release
+#   push           full release: version bump, changelog, commit, tag, push
 #
-# A caller therefore wires up all three triggers and passes no conditions of its
-# own; see the README.
+# There is deliberately nothing to configure and no way to trigger this by
+# hand. For a release candidate cut from a branch, see prepare-prerelease.yml.
 on:
   workflow_call:
     inputs:
-      prerelease-label:
-        description: >-
-          Label for a manually dispatched prerelease, e.g. `beta` produces
-          1.2.3-beta.0. Defaults to `rc`. Ignored for pull requests and for
-          pushes to the default branch.
-        type: string
-        required: false
-        default: ""
       knope-version:
         type: string
         required: false
         default: "0.23.0"
-      default-branch:
-        description: >-
-          Branch whose pushes produce a full release. A dispatch from any other
-          ref produces a prerelease instead.
-        type: string
-        required: false
-        default: main
     secrets:
       token:
         description: >-
@@ -48,24 +30,17 @@ jobs:
   prepare-release:
     runs-on: ubuntu-latest
     steps:
-      # GitHub always offers every branch in the Run workflow dropdown, and
-      # there is no way to restrict it. Refuse the default branch here instead:
-      # a push to it already releases automatically, so a manual run would
-      # either duplicate that release or race it.
-      - name: Refuse a manual run on the default branch
-        if: >-
-          github.event_name == 'workflow_dispatch'
-          && github.ref == format('refs/heads/{0}', inputs.default-branch)
+      # A caller wires up pull_request and push only. Refuse anything else
+      # rather than releasing from an unexpected ref.
+      - name: Refuse events this workflow does not handle
+        if: github.event_name != 'pull_request' && github.event_name != 'push'
         run: |
-          echo "::error::Refusing to release ${{ inputs.default-branch }} manually: merging to it already releases automatically. Dispatch from a feature branch to cut a prerelease, or let the merge do the release."
+          echo "::error::prepare-release.yml handles pull_request and push only; got ${{ github.event_name }}. Use prepare-prerelease.yml for a manual release candidate."
           exit 1
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Release from the ref this was dispatched on, so a prerelease cut
-          # from a branch tags that branch rather than the default one.
-          ref: ${{ github.ref }}
           token: ${{ secrets.token }}
 
       - uses: rigetti/qcs-gha-infrastructure/actions/setup-knope@main
@@ -77,27 +52,13 @@ jobs:
         run: knope release --verbose --dry-run
 
       - name: Configure git identity
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         run: |
           git config --global user.name '${{ github.triggering_actor }}'
           git config --global user.email '${{ github.triggering_actor }}@users.noreply.github.com'
 
       - name: Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.token }}
-          PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
-          DEFAULT_BRANCH: ${{ inputs.default-branch }}
-        run: |
-          set -euo pipefail
-
-          # Only a push reaches this branch with the default ref: a manual run
-          # on the default branch was rejected above.
-          if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
-            echo "Running full release for ${DEFAULT_BRANCH}"
-            knope release --verbose
-          else
-            label="${PRERELEASE_LABEL:-rc}"
-            echo "Running prerelease with label '${label}'"
-            knope release --verbose "--prerelease-label=${label}"
-          fi
+        run: knope release --verbose
