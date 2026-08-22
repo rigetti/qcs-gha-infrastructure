@@ -191,36 +191,6 @@ which is what makes a release candidate testable before merging. `default-branch
 downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
 new workflow runs.
 
-Supersedes `knope-dry-run.yml` and `knope-release.yml` below, which remain for
-callers that want only one half.
-
-### `knope-dry-run.yml`
-
-Verifies on pull requests that a release can be prepared.
-
-```yaml
-jobs:
-  knope-dry-run:
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/knope-dry-run.yml@main
-```
-
-### `knope-release.yml`
-
-Runs knope's `release` workflow: bump versions, update the changelog, commit,
-tag, and push.
-
-```yaml
-jobs:
-  release:
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/knope-release.yml@main
-    secrets:
-      token: ${{ secrets.RELEASE_TOKEN }}
-```
-
-Note: pushes made with the default `GITHUB_TOKEN` do not trigger further
-workflow runs. If the release commit or tag must trigger a build-and-publish
-workflow, pass a PAT or GitHub App token instead.
-
 ## Versioning
 
 Callers may pin to a tag (`@v0.1.0`) instead of `@main` once tags exist. The
