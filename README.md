@@ -148,6 +148,52 @@ scope once approved. The reviewer is the whole control. Read the diff — build
 scripts, proc macros, `Cargo.toml` patches, and test fixtures included — before
 approving, and pin the environment's reviewers to maintainers only.
 
+### `prepare-release.yml`
+
+One workflow covering the whole knope release lifecycle. What it does depends on
+the event the caller was triggered by, so the caller wires up all three triggers
+and adds no conditions of its own:
+
+| Caller's event | Behavior |
+|---|---|
+| `pull_request` | `knope release --dry-run`, so the PR shows what it would release |
+| `push` to the default branch | full release: bump, changelog, commit, tag, push |
+| `workflow_dispatch` | prerelease from the dispatched ref, labelled `rc` unless overridden |
+
+```yaml
+name: Prepare release
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      prerelease-label:
+        description: "Prerelease label; defaults to 'rc'."
+        required: false
+        default: ""
+
+jobs:
+  prepare-release:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-release.yml@main
+    with:
+      prerelease-label: ${{ inputs.prerelease-label }}
+    secrets:
+      token: ${{ secrets.RELEASE_TOKEN }}
+```
+
+Dispatching from a non-default branch cuts a prerelease tagged on that branch,
+which is what makes a release candidate testable before merging. `default-branch`
+(default `main`) decides which push is a full release; `knope-version` pins knope.
+
+`token` must be a PAT or app token if the release push has to trigger anything
+downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
+new workflow runs.
+
+Supersedes `knope-dry-run.yml` and `knope-release.yml` below, which remain for
+callers that want only one half.
+
 ### `knope-dry-run.yml`
 
 Verifies on pull requests that a release can be prepared.

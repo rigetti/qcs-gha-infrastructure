@@ -1,0 +1,89 @@
+name: Prepare release
+
+# Reusable workflow: knope-driven releases, with behavior determined by the
+# event the caller was triggered by.
+#
+#   pull_request      dry run, so a PR shows what it would release
+#   push to main      full release: version bump, changelog, commit, tag, push
+#   workflow_dispatch prerelease from the dispatched ref, labelled `rc` unless
+#                     `prerelease-label` says otherwise
+#
+# A caller therefore wires up all three triggers and passes no conditions of its
+# own; see the README.
+on:
+  workflow_call:
+    inputs:
+      prerelease-label:
+        description: >-
+          Label for a manually dispatched prerelease, e.g. `beta` produces
+          1.2.3-beta.0. Defaults to `rc`. Ignored for pull requests and for
+          pushes to the default branch.
+        type: string
+        required: false
+        default: ""
+      knope-version:
+        type: string
+        required: false
+        default: "0.23.0"
+      default-branch:
+        description: >-
+          Branch whose pushes produce a full release. A dispatch from any other
+          ref produces a prerelease instead.
+        type: string
+        required: false
+        default: main
+    secrets:
+      token:
+        description: >-
+          Token used to push the release commit and tag and to publish the
+          release. Must be a PAT or app token if the push needs to trigger
+          further workflows, such as a binary build: pushes made with
+          GITHUB_TOKEN do not start new runs.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Release from the ref this was dispatched on, so a prerelease cut
+          # from a branch tags that branch rather than the default one.
+          ref: ${{ github.ref }}
+          token: ${{ secrets.token }}
+
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-knope@main
+        with:
+          version: ${{ inputs.knope-version }}
+
+      - name: Dry-run release
+        if: github.event_name == 'pull_request'
+        run: knope release --verbose --dry-run
+
+      - name: Configure git identity
+        if: github.event_name != 'pull_request'
+        run: |
+          git config --global user.name '${{ github.triggering_actor }}'
+          git config --global user.email '${{ github.triggering_actor }}@users.noreply.github.com'
+
+      - name: Release
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.token }}
+          PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            echo "Running full release for ${DEFAULT_BRANCH}"
+            knope release --verbose
+          else
+            label="${PRERELEASE_LABEL:-rc}"
+            echo "Running prerelease with label '${label}'"
+            knope release --verbose "--prerelease-label=${label}"
+          fi
