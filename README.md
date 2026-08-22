@@ -52,37 +52,6 @@ Both paths respect `cache: "false"`, which disables caching entirely — use tha
 when building untrusted code, so its artifacts never land in a cache that a
 later trusted run would read.
 
-### `actions/todo-curator`
-
-Installs [todo-curator](https://github.com/rigetti/todo-curator) from its GitHub
-releases with [ubi](https://github.com/houseabsolute/ubi) and checks the
-repository's TODO comments against issue and merge-request status.
-
-```yaml
-- uses: rigetti/qcs-gha-infrastructure/actions/todo-curator@main
-  with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    gitlab-token: ${{ secrets.MY_GITLAB_TOKEN }}  # only for GitLab refs
-    version: v0.1.12          # optional; pinned by default
-    command: check-all        # or check-closed / check-invalid /
-                              # check-mr-todos / validate-auth; "" installs only
-    args: --format json       # optional
-    path: .                   # optional
-    exclude-file-regex: ""    # optional; a single regex, not a list
-```
-
-Following ubi's CI guidance: the bootstrap script does the install, `--tag`
-pins the version so an upstream release cannot silently change your CI, and
-`GITHUB_TOKEN` is passed through because unauthenticated GitHub API access is
-rate limited to as little as 60 requests per hour per IP.
-
-`secrets.GITHUB_TOKEN` covers both the download and same-repository issue
-references. Referencing issues in *other* repositories, or in GitLab, needs a
-token with access to those.
-
-If the repository's own tests contain TODO-shaped fixtures, set
-`exclude-file-regex` or the checks will flag them.
-
 ### `actions/setup-knope`
 
 Installs the [knope](https://knope.tech) release-automation CLI.
