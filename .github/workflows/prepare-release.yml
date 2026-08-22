@@ -48,6 +48,18 @@ jobs:
   prepare-release:
     runs-on: ubuntu-latest
     steps:
+      # GitHub always offers every branch in the Run workflow dropdown, and
+      # there is no way to restrict it. Refuse the default branch here instead:
+      # a push to it already releases automatically, so a manual run would
+      # either duplicate that release or race it.
+      - name: Refuse a manual run on the default branch
+        if: >-
+          github.event_name == 'workflow_dispatch'
+          && github.ref == format('refs/heads/{0}', inputs.default-branch)
+        run: |
+          echo "::error::Refusing to release ${{ inputs.default-branch }} manually: merging to it already releases automatically. Dispatch from a feature branch to cut a prerelease, or let the merge do the release."
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -79,6 +91,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Only a push reaches this branch with the default ref: a manual run
+          # on the default branch was rejected above.
           if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
             echo "Running full release for ${DEFAULT_BRANCH}"
             knope release --verbose

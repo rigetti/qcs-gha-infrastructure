@@ -187,6 +187,12 @@ Dispatching from a non-default branch cuts a prerelease tagged on that branch,
 which is what makes a release candidate testable before merging. `default-branch`
 (default `main`) decides which push is a full release; `knope-version` pins knope.
 
+**Dispatching on the default branch fails immediately, by design.** A push there
+already releases, so a manual run would duplicate or race it. GitHub offers every
+branch in the Run workflow dropdown with no way to restrict the list, so the
+workflow refuses the default branch in its first step — before checkout, and
+before any token is used.
+
 `token` must be a PAT or app token if the release push has to trigger anything
 downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
 new workflow runs.
