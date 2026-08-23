@@ -30,7 +30,11 @@ on:
           release. Must be a PAT or app token if the push needs to trigger
           further workflows, such as a binary build: pushes made with
           GITHUB_TOKEN do not start new runs.
-        required: true
+
+          Required for the release path. Pull-request dry runs fall back to the
+          job's own token, so a Dependabot pull request — which is given no
+          Actions secrets — still gets its dry run.
+        required: false
 
 permissions:
   contents: read
@@ -54,10 +58,25 @@ jobs:
           echo "::error::prepare-release.yml handles pull_request and push only; got ${{ github.event_name }}. Use prepare-prerelease.yml for a manual release candidate."
           exit 1
 
+      # A dry run needs no privileged token, and Dependabot pull requests are
+      # given no Actions secrets at all, so `token` arrives empty there and
+      # actions/checkout rejects it outright. Fall back to the job's own token.
+      # The release path cannot accept that fallback, hence the check below.
+      # The secrets context is not available to an `if`, so the test is here.
+      - name: Require a real token for an actual release
+        if: github.event_name == 'push'
+        env:
+          TOKEN: ${{ secrets.token }}
+        run: |
+          if [[ -z "${TOKEN}" ]]; then
+            echo "::error::A release needs the 'token' secret: a PAT or app token, so the release push triggers downstream workflows."
+            exit 1
+          fi
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.token }}
+          token: ${{ secrets.token || github.token }}
 
       - name: Install knope
         uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2

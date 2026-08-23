@@ -76,7 +76,7 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.1.0
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.1.1
         with:
           toolchain: ${{ inputs.toolchain }}
           cache-key: ${{ inputs.cache-key }}
