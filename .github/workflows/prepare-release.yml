@@ -14,6 +14,15 @@ on:
         type: string
         required: false
         default: "0.23.0"
+      release-commit-prefix:
+        description: >-
+          Commit-message prefix that marks knope's own release commit. A push of
+          such a commit is skipped: it is the output of a release, not a change
+          to release, and releasing it again would fail with nothing to do. Must
+          match the message in knope.toml's commit step.
+        type: string
+        required: false
+        default: "chore: prepare release"
     secrets:
       token:
         description: >-
@@ -28,6 +37,13 @@ permissions:
 
 jobs:
   prepare-release:
+    # Skip knope's own release commit. The token that pushes it is a PAT, which
+    # does start new workflow runs, so without this the release re-enters this
+    # workflow and fails on the second pass. Skipped rather than failed: it is
+    # the expected shape of a successful release, not a problem to report.
+    if: >-
+      !(github.event_name == 'push'
+        && startsWith(github.event.head_commit.message, inputs.release-commit-prefix))
     runs-on: ubuntu-latest
     steps:
       # A caller wires up pull_request and push only. Refuse anything else

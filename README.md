@@ -146,7 +146,14 @@ it by hand:
 | Caller's event | Behavior |
 |---|---|
 | `pull_request` | `knope release --dry-run`, so the PR shows what it would release |
-| `push` to the release branch | full release: bump, changelog, commit, tag, push |
+| `push` to the release branch | full release: bump, changelog, commit, push, publish |
+| `push` of knope's own release commit | skipped |
+
+That last row matters: the release push has to be made with a PAT so it can
+trigger a binary build, and a PAT push also re-enters this workflow. The job is
+skipped when the head commit starts with `release-commit-prefix` (default
+`chore: prepare release`) — a successful release, not something to report as a
+failure. Change the input if knope.toml uses a different commit message.
 
 ```yaml
 name: Prepare release
