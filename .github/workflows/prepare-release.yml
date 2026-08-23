@@ -43,8 +43,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.token }}
 
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-knope@main
+      - name: Install knope
+        uses: knope-dev/action@v2.1.2
         with:
+          # Test before updating, breaking changes likely:
+          # https://github.com/knope-dev/action#install-latest-version
           version: ${{ inputs.knope-version }}
 
       - name: Dry-run release

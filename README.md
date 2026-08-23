@@ -52,16 +52,6 @@ Both paths respect `cache: "false"`, which disables caching entirely — use tha
 when building untrusted code, so its artifacts never land in a cache that a
 later trusted run would read.
 
-### `actions/setup-knope`
-
-Installs the [knope](https://knope.tech) release-automation CLI.
-
-```yaml
-- uses: rigetti/qcs-gha-infrastructure/actions/setup-knope@main
-  with:
-    version: "0.23.0"  # optional
-```
-
 ## Reusable workflows
 
 ### `rust-ci.yml`
