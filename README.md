@@ -206,24 +206,69 @@ Run workflow dropdown with no way to restrict the list, which is why this is a
 workflow-level check rather than configuration. `default-branch` (default
 `main`) names the branch to refuse.
 
-## Versioning
+## Pinning
 
-Pin callers to a release tag, not `@main`:
+**Every `uses:` in this repository is either a commit SHA or a tag in a
+repository we control. Keep it that way.**
+
+### Why third-party actions are pinned by SHA
+
+`actions/checkout@v4` is not a version. It is a *mutable pointer*: the
+maintainers move the `v4` tag with each 4.x release, and Actions re-resolves it
+when the job starts. Referencing it delegates, to someone outside this
+organization, the decision about what code runs against our runners and our
+secrets — at a moment we do not choose.
+
+That is not hypothetical. In March 2025 an attacker retargeted the version tags
+of `tj-actions/changed-files` at code that dumped runner memory, secrets
+included, into public build logs. Thousands of repositories picked it up on
+their next run, having changed nothing. Repositories that pinned by SHA were
+unaffected, because a commit SHA is content-addressed and cannot be moved.
+
+So references look like this, with the version in a trailing comment for
+readability:
+
+```yaml
+uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+```
+
+The obvious cost is that security patches stop arriving on their own.
+**Pinning without automated bumps is a downgrade, not an upgrade** — it trades a
+supply-chain risk for silent staleness. Consumers should run Dependabot with the
+`github-actions` ecosystem enabled; it parses exactly this form and rewrites the
+SHA and the comment together.
+
+This applies to `actions/*` as well as to everything else. GitHub's own org is
+lower risk, and plenty of projects leave it on major tags, but a uniform rule is
+the one people apply correctly a year later.
+
+Two mechanics worth knowing:
+
+- Some tags, such as `mozilla-actions/sccache-action@v0.0.11`, are *annotated*
+  tags. `git ls-remote` and the refs API return the tag object's SHA, not the
+  commit's. Pinning that SHA fails; peel it to the commit first
+  (`gh api repos/OWNER/REPO/git/tags/<sha> -q .object.sha`).
+- A trailing comment is not verified by anything. If you hand-edit a SHA, the
+  comment can end up describing a different version than the pin.
+
+### Why callers pin this repository to a tag
+
+`@main` means every consumer picks up our changes on its next run, unreviewed
+and unannounced. A caller that pinned a tag can review a bump; a caller on
+`@main` finds out when a job fails.
 
 ```yaml
 uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-ci.yml@v0.1.0
 ```
 
-`@main` means every consumer picks up a change on its next run, with no review
-and no way to notice. The examples above use `@main` for brevity; real callers
-should not.
+The usage examples above say `@main` for brevity. Real callers should not.
+
+### Bumping this repository's own tag
 
 The composite-action references *inside* these reusable workflows are pinned to
-the matching tag, so pinning a workflow pins what it uses transitively. Bumping
-the tag is therefore a two-step change: update the internal references to the
-new tag in the same commit the tag will point at.
+the matching release tag, so pinning a workflow pins what it uses transitively —
+otherwise a caller would pin the outer layer while the action underneath kept
+floating.
 
-Third-party actions are pinned by commit SHA with the version in a trailing
-comment, since a tag like `v4` is mutable and a compromised upstream can move
-it. Dependabot understands this form and will open PRs to bump both the SHA and
-the comment.
+That makes a release a two-step change: update the internal references to the
+new tag **in the same commit the tag will point at**, then tag that commit.
