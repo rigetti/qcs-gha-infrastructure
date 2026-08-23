@@ -51,7 +51,7 @@ jobs:
           echo "::error::${{ inputs.default-branch }} releases automatically when merged to; there is nothing to prerelease. Dispatch this from the branch you want a release candidate for."
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           # Prerelease the dispatched branch, so its tag lands on that branch.
@@ -59,7 +59,7 @@ jobs:
           token: ${{ secrets.token }}
 
       - name: Install knope
-        uses: knope-dev/action@v2.1.2
+        uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2
         with:
           # Test before updating, breaking changes likely:
           # https://github.com/knope-dev/action#install-latest-version

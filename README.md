@@ -208,6 +208,22 @@ workflow-level check rather than configuration. `default-branch` (default
 
 ## Versioning
 
-Callers may pin to a tag (`@v0.1.0`) instead of `@main` once tags exist. The
-composite-action references inside the reusable workflows are pinned to `main`;
-a caller pinning a workflow tag does not pin those transitively.
+Pin callers to a release tag, not `@main`:
+
+```yaml
+uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-ci.yml@v0.1.0
+```
+
+`@main` means every consumer picks up a change on its next run, with no review
+and no way to notice. The examples above use `@main` for brevity; real callers
+should not.
+
+The composite-action references *inside* these reusable workflows are pinned to
+the matching tag, so pinning a workflow pins what it uses transitively. Bumping
+the tag is therefore a two-step change: update the internal references to the
+new tag in the same commit the tag will point at.
+
+Third-party actions are pinned by commit SHA with the version in a trailing
+comment, since a tag like `v4` is mutable and a compromised upstream can move
+it. Dependabot understands this form and will open PRs to bump both the SHA and
+the comment.

@@ -42,14 +42,14 @@ jobs:
         include: ${{ fromJSON(inputs.matrix) }}
     runs-on: ${{ matrix.runs-on }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # Keep the path short: deep dependency trees overrun Windows' path limit
       # when building inside the workspace. The `runner` context is not
       # available in a job-level `env`, hence the step.
       - name: Use a short target directory
         shell: bash
         run: echo "CARGO_TARGET_DIR=${RUNNER_TEMP}/t" >> "${GITHUB_ENV}"
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.1.0
         with:
           toolchain: ${{ inputs.toolchain }}
           targets: ${{ matrix.target }}
@@ -80,7 +80,7 @@ jobs:
              "release/${{ inputs.bin }}-${{ matrix.target }}${ext}"
           chmod +x release/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ matrix.target }}
           path: release/

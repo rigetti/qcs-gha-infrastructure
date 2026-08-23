@@ -35,8 +35,8 @@ jobs:
   fmt:
     runs-on: ${{ inputs.runs-on }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.1.0
         with:
           toolchain: ${{ inputs.toolchain }}
           components: rustfmt
@@ -46,8 +46,8 @@ jobs:
   clippy:
     runs-on: ${{ inputs.runs-on }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.1.0
         with:
           toolchain: ${{ inputs.toolchain }}
           components: clippy
@@ -57,14 +57,14 @@ jobs:
   test:
     runs-on: ${{ inputs.runs-on }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.1.0
         with:
           toolchain: ${{ inputs.toolchain }}
           cache-key: test
       - name: Install cargo-nextest
         if: inputs.install-nextest
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@6cd13508893c0e7eab5f273c2575d3859bd7229a # v2
         with:
           tool: cargo-nextest
       - run: ${{ inputs.test-command }}
