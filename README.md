@@ -221,9 +221,12 @@ secrets — at a moment we do not choose.
 
 That is not hypothetical. In March 2025 an attacker retargeted the version tags
 of `tj-actions/changed-files` at code that dumped runner memory, secrets
-included, into public build logs. Thousands of repositories picked it up on
-their next run, having changed nothing. Repositories that pinned by SHA were
-unaffected, because a commit SHA is content-addressed and cannot be moved.
+included, into public build logs — CVE-2025-30066, along with a related
+compromise of `reviewdog/action-setup`. See CISA's alert:
+<https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-tj-actionschanged-files-cve-2025-30066-and-reviewdogaction>.
+Repositories referencing the mutable tags picked it up on their next run, having
+changed nothing. Those pinned by SHA were unaffected, because a commit SHA is
+content-addressed and cannot be moved.
 
 So references look like this, with the version in a trailing comment for
 readability:
