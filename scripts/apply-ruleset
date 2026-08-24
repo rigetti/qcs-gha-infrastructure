@@ -2,12 +2,19 @@
 # Apply a ruleset JSON file to a repository, creating it or updating the
 # existing ruleset of the same name.
 #
-#   scripts/apply-ruleset rigetti/todo-curator
-#   scripts/apply-ruleset rigetti/todo-curator rulesets/default-branch.json
-#   DRY_RUN=1 scripts/apply-ruleset rigetti/todo-curator
+#   scripts/apply-ruleset rigetti/my-repo
+#   scripts/apply-ruleset rigetti/my-repo rulesets/default-branch.json
+#   DRY_RUN=1 scripts/apply-ruleset rigetti/my-repo          # show the diff
+#   REPLACE_CHECKS=1 scripts/apply-ruleset rigetti/my-repo   # see below
 #
 # Matching on name rather than id is what makes this idempotent across
 # repositories: ruleset ids are per-repository, so a file cannot carry one.
+#
+# Required status checks are left alone when updating an existing ruleset.
+# Check names are per-repository — they come from that repository's own job and
+# workflow names — so a shared file has no business overwriting them. The rule
+# in the file seeds a repository that has no ruleset yet. Set REPLACE_CHECKS=1
+# to impose the file's checks anyway.
 
 set -euo pipefail
 
@@ -33,22 +40,42 @@ fi
 existing="$(gh api "repos/${repo}/rulesets" --jq \
     ".[] | select(.name == \"${name}\") | .id" 2>/dev/null || true)"
 
+payload="$(mktemp)"
+trap 'rm -f "${payload}"' EXIT
+cp "${file}" "${payload}"
+
+if [[ -n "${existing}" && -z "${REPLACE_CHECKS:-}" ]]; then
+    live_checks="$(gh api "repos/${repo}/rulesets/${existing}" --jq \
+        '[.rules[] | select(.type == "required_status_checks")]')"
+
+    if [[ "${live_checks}" != "[]" ]]; then
+        echo "Keeping the required status checks already set on ${repo}:"
+        jq -r '.[].parameters.required_status_checks[]?.context
+               | "  " + .' <<<"${live_checks}"
+        jq --argjson live "${live_checks}" \
+            '.rules = ([.rules[] | select(.type != "required_status_checks")] + $live)' \
+            "${file}" > "${payload}"
+    fi
+fi
+
 if [[ -n "${DRY_RUN:-}" ]]; then
     if [[ -n "${existing}" ]]; then
         echo "Would update ruleset '${name}' (id ${existing}) on ${repo}:"
-        gh api "repos/${repo}/rulesets/${existing}" --jq \
-            '{name, enforcement, conditions, rules}' | diff - <(jq '{name, enforcement, conditions, rules}' "${file}") \
+        diff <(gh api "repos/${repo}/rulesets/${existing}" \
+                 | jq -S '{enforcement, conditions, rules}') \
+             <(jq -S '{enforcement, conditions, rules}' "${payload}") \
             && echo "  (no change)"
     else
         echo "Would create ruleset '${name}' on ${repo} from ${file}"
+        jq -S '{enforcement, conditions, rules}' "${payload}"
     fi
     exit 0
 fi
 
 if [[ -n "${existing}" ]]; then
     echo "Updating ruleset '${name}' (id ${existing}) on ${repo}"
-    gh api --method PUT "repos/${repo}/rulesets/${existing}" --input "${file}" --jq .name
+    gh api --method PUT "repos/${repo}/rulesets/${existing}" --input "${payload}" --jq .name
 else
     echo "Creating ruleset '${name}' on ${repo}"
-    gh api --method POST "repos/${repo}/rulesets" --input "${file}" --jq .name
+    gh api --method POST "repos/${repo}/rulesets" --input "${payload}" --jq .name
 fi
