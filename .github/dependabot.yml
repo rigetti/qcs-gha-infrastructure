@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Every `uses:` here is pinned to a commit SHA, which is deliberate — see the
+  # Pinning section of the README — but a pin with no update path is just a
+  # stale dependency. Dependabot rewrites the SHA and the version comment
+  # together.
+  #
+  # `directories` rather than `directory`: the github-actions ecosystem scans
+  # `.github/workflows` under `/`, and a composite action's `action.yml` is
+  # only seen when its own directory is listed.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /actions/setup-rust
+      - /actions/reset-changelogs
+    schedule:
+      interval: weekly
+    groups:
+      # One pull request for the routine bumps, rather than seven.
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

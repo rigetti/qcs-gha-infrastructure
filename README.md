@@ -415,6 +415,16 @@ Two mechanics worth knowing:
 - A trailing comment is not verified by anything. If you hand-edit a SHA, the
   comment can end up describing a different version than the pin.
 
+### Keeping the pins current here
+
+`.github/dependabot.yml` runs the `github-actions` ecosystem weekly over
+`.github/workflows` and each composite action's directory — the latter are only
+scanned when listed explicitly. Minor and patch bumps are grouped into one pull
+request; major bumps arrive separately, since those deserve to be read.
+
+A consumer repository wants the same file: pinning without an update path is
+just a stale dependency that nobody is watching.
+
 ### Why callers pin this repository to a tag
 
 `@main` means every consumer picks up our changes on its next run, unreviewed
