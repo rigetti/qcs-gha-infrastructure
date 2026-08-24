@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Apply a ruleset JSON file to a repository, creating it or updating the
+# existing ruleset of the same name.
+#
+#   scripts/apply-ruleset rigetti/todo-curator
+#   scripts/apply-ruleset rigetti/todo-curator rulesets/default-branch.json
+#   DRY_RUN=1 scripts/apply-ruleset rigetti/todo-curator
+#
+# Matching on name rather than id is what makes this idempotent across
+# repositories: ruleset ids are per-repository, so a file cannot carry one.
+
+set -euo pipefail
+
+repo="${1:-}"
+file="${2:-$(dirname "$0")/../rulesets/default-branch.json}"
+
+if [[ -z "${repo}" ]]; then
+    echo "usage: $(basename "$0") OWNER/REPO [RULESET_JSON]" >&2
+    exit 2
+fi
+
+if [[ ! -f "${file}" ]]; then
+    echo "No such ruleset file: ${file}" >&2
+    exit 1
+fi
+
+name="$(jq -r .name "${file}")"
+if [[ -z "${name}" || "${name}" == "null" ]]; then
+    echo "Ruleset file has no name: ${file}" >&2
+    exit 1
+fi
+
+existing="$(gh api "repos/${repo}/rulesets" --jq \
+    ".[] | select(.name == \"${name}\") | .id" 2>/dev/null || true)"
+
+if [[ -n "${DRY_RUN:-}" ]]; then
+    if [[ -n "${existing}" ]]; then
+        echo "Would update ruleset '${name}' (id ${existing}) on ${repo}:"
+        gh api "repos/${repo}/rulesets/${existing}" --jq \
+            '{name, enforcement, conditions, rules}' | diff - <(jq '{name, enforcement, conditions, rules}' "${file}") \
+            && echo "  (no change)"
+    else
+        echo "Would create ruleset '${name}' on ${repo} from ${file}"
+    fi
+    exit 0
+fi
+
+if [[ -n "${existing}" ]]; then
+    echo "Updating ruleset '${name}' (id ${existing}) on ${repo}"
+    gh api --method PUT "repos/${repo}/rulesets/${existing}" --input "${file}" --jq .name
+else
+    echo "Creating ruleset '${name}' on ${repo}"
+    gh api --method POST "repos/${repo}/rulesets" --input "${file}" --jq .name
+fi

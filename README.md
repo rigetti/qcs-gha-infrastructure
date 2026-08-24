@@ -367,6 +367,39 @@ Ported from the `knope.yaml` job template in the GitLab `qcs-infrastructure`
 repository, which used `tomlq`; this reads `knope.toml` with the runner's own
 Python instead, so nothing needs installing.
 
+## Rulesets
+
+`rulesets/default-branch.json` is the default-branch protection QCS repositories
+should share, and `scripts/apply-ruleset` applies it:
+
+```bash
+scripts/apply-ruleset rigetti/my-repo                   # create or update
+DRY_RUN=1 scripts/apply-ruleset rigetti/my-repo         # show the diff first
+scripts/apply-ruleset rigetti/my-repo rulesets/other.json
+```
+
+Rulesets are plain JSON over the REST API, so a file is the whole story — the
+same document the UI exports. The script matches an existing ruleset **by
+name** and PUTs over it, or POSTs a new one: ids are per-repository, so a shared
+file cannot carry one.
+
+What it enforces: no deletion, no force-push, pull requests required with thread
+resolution, and one required status check — **`CI gate`**. A single aggregate
+check is deliberate. Requiring individual jobs breaks every pull request that
+legitimately skips one, because a skipped check counts as neutral rather than
+passing: fork pull requests, which never receive secrets, and Dependabot's,
+which receive only Dependabot secrets. See `rust-ci.yml` and the `CI gate`
+pattern in `todo-curator`'s `ci.yml`.
+
+Adopting it in a repository that already has a differently-named ruleset creates
+a *second* one rather than replacing it. Rename the existing ruleset to
+`default branch` first, or delete it.
+
+**Consider org-level rulesets instead.** `orgs/rigetti/rulesets` takes the same
+JSON, applies to many repositories at once by name pattern or custom property,
+and cannot drift per repository. It needs org-admin rights, which is the only
+reason this is per-repository.
+
 ## Pinning
 
 **Every `uses:` in this repository is either a commit SHA or a tag in a
