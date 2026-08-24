@@ -1,0 +1,85 @@
+name: Reset changelogs
+description: >-
+  Restore each changelog named in knope.toml to its state on the default
+  branch, so repeated prereleases from one branch do not accumulate entries.
+
+# Every prerelease runs PrepareRelease again, and PrepareRelease writes the
+# pending changes into the changelog. Cut three release candidates from a
+# branch and the third changelog entry contains the first two entries as well,
+# which then lands on the default branch when the branch merges.
+#
+# Restoring the changelog first means each run writes the entry it would have
+# written on its own. A changelog that does not exist on the default branch is
+# deleted rather than restored — it is new in this branch, so its correct prior
+# state is "absent".
+
+inputs:
+  default-branch:
+    description: Branch whose changelogs are the ones to restore from.
+    required: false
+    default: main
+  knope-config:
+    description: Path to the knope configuration file.
+    required: false
+    default: knope.toml
+
+runs:
+  using: composite
+  steps:
+    - name: Reset changelogs to the default branch
+      shell: bash
+      env:
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        KNOPE_CONFIG: ${{ inputs.knope-config }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! -f "${KNOPE_CONFIG}" ]]; then
+          echo "No ${KNOPE_CONFIG}; nothing to reset."
+          exit 0
+        fi
+
+        # knope.toml declares either one [package] or a [packages] table, each
+        # optionally naming a changelog. tomllib ships with the runner's
+        # Python, so this needs nothing installed.
+        mapfile -t changelogs < <(python3 - "${KNOPE_CONFIG}" <<'PY'
+        import sys, tomllib
+
+        with open(sys.argv[1], "rb") as f:
+            config = tomllib.load(f)
+
+        packages = config.get("packages")
+        if packages:
+            entries = packages.values()
+        else:
+            entries = [config.get("package", {})]
+
+        for entry in entries:
+            changelog = entry.get("changelog")
+            if changelog:
+                print(changelog)
+        PY
+        )
+
+        if [[ ${#changelogs[@]} -eq 0 ]]; then
+          echo "No changelog declared in ${KNOPE_CONFIG}; nothing to reset."
+          exit 0
+        fi
+
+        # The default branch is not necessarily checked out, and a shallow
+        # clone may not have it at all.
+        git fetch --no-tags --depth=1 origin "${DEFAULT_BRANCH}"
+
+        for changelog in "${changelogs[@]}"; do
+          if git cat-file -e "FETCH_HEAD:${changelog}" 2>/dev/null; then
+            echo "Restoring ${changelog} from origin/${DEFAULT_BRANCH}"
+            git restore --source=FETCH_HEAD -- "${changelog}"
+          elif [[ -e "${changelog}" ]]; then
+            echo "${changelog} does not exist on ${DEFAULT_BRANCH}; removing it"
+            rm -f "${changelog}"
+          else
+            echo "${changelog} exists on neither side; nothing to do"
+          fi
+        done
+
+        git status --short

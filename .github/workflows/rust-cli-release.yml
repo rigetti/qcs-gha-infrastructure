@@ -61,7 +61,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch'
       || startsWith(github.event.head_commit.message, inputs.release-commit-prefix)
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.3.0
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.4.0
     with:
       bin: ${{ inputs.bin }}
       matrix: ${{ inputs.matrix }}
@@ -71,7 +71,7 @@ jobs:
     needs: build
     # Only a release commit has a version to publish.
     if: startsWith(github.event.head_commit.message, inputs.release-commit-prefix)
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.3.0
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.4.0
     with:
       artifact-path: ${{ inputs.artifact-path }}
       knope-workflow: ${{ inputs.knope-workflow }}

@@ -22,6 +22,13 @@ on:
         type: string
         required: false
         default: release
+      default-branch:
+        description: >-
+          Branch whose changelogs are restored before knope runs, so a branch
+          cutting repeated prereleases does not accumulate entries.
+        type: string
+        required: false
+        default: main
       release-commit-prefix:
         description: >-
           Commit-message prefix that marks knope's own release commit. A push of
@@ -92,6 +99,14 @@ jobs:
           # Test before updating, breaking changes likely:
           # https://github.com/knope-dev/action#install-latest-version
           version: ${{ inputs.knope-version }}
+
+      # Repeated prereleases from one branch would otherwise accumulate
+      # changelog entries: each PrepareRelease writes the pending changes on
+      # top of what the previous one already wrote.
+      - name: Reset changelogs
+        uses: rigetti/qcs-gha-infrastructure/actions/reset-changelogs@v0.4.0
+        with:
+          default-branch: ${{ inputs.default-branch }}
 
       - name: Dry-run release
         if: github.event_name == 'pull_request'

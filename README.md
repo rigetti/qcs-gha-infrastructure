@@ -341,6 +341,32 @@ Run workflow dropdown with no way to restrict the list, which is why this is a
 workflow-level check rather than configuration. `default-branch` (default
 `main`) names the branch to refuse.
 
+### `actions/reset-changelogs`
+
+Restores every changelog named in `knope.toml` to its state on the default
+branch. Used by `prepare-release.yml` and `prepare-prerelease.yml` before knope
+runs; rarely called directly.
+
+```yaml
+- uses: rigetti/qcs-gha-infrastructure/actions/reset-changelogs@v0.4.0
+  with:
+    default-branch: main        # optional
+    knope-config: knope.toml    # optional
+```
+
+**Why.** Every prerelease runs `PrepareRelease`, and `PrepareRelease` writes the
+pending changes into the changelog. Cut three release candidates from one branch
+and the third changelog entry contains the first two as well — and that
+accumulation lands on the default branch when the branch merges. Restoring the
+changelog first means each run writes only the entry it would have written on
+its own.
+
+A changelog that does not exist on the default branch is deleted rather than
+restored: it is new in this branch, so its correct prior state is absent.
+Ported from the `knope.yaml` job template in the GitLab `qcs-infrastructure`
+repository, which used `tomlq`; this reads `knope.toml` with the runner's own
+Python instead, so nothing needs installing.
+
 ## Pinning
 
 **Every `uses:` in this repository is either a commit SHA or a tag in a
