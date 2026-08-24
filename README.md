@@ -190,8 +190,13 @@ jobs:
 
   publish:
     needs: build
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.2.0
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.2.1
 ```
+
+Pass `ref: ${{ github.ref }}` to both when an earlier job in the same run
+pushed the version bump — on `workflow_dispatch`, checkout otherwise defaults
+to the commit the run started at, which predates that push, and knope would
+find nothing to release.
 
 with knope.toml split to match:
 

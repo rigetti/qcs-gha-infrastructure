@@ -29,6 +29,14 @@ on:
         type: string
         required: false
         default: stable
+      ref:
+        description: >-
+          Git ref to check out. Defaults to the event's own ref, which for
+          workflow_dispatch is the commit the run started at — pass a branch
+          name when an earlier job in the same run has pushed to it.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -43,13 +51,15 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
       # Keep the path short: deep dependency trees overrun Windows' path limit
       # when building inside the workspace. The `runner` context is not
       # available in a job-level `env`, hence the step.
       - name: Use a short target directory
         shell: bash
         run: echo "CARGO_TARGET_DIR=${RUNNER_TEMP}/t" >> "${GITHUB_ENV}"
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.2.0
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.2.1
         with:
           toolchain: ${{ inputs.toolchain }}
           targets: ${{ matrix.target }}

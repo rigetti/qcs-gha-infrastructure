@@ -28,6 +28,14 @@ on:
         type: string
         required: false
         default: "0.23.0"
+      ref:
+        description: >-
+          Git ref to check out. Defaults to the event's own ref, which for
+          workflow_dispatch is the commit the run started at — pass a branch
+          name when an earlier job in the same run has pushed to it.
+        type: string
+        required: false
+        default: ""
     secrets:
       token:
         description: >-
@@ -44,6 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.ref }}
           # knope compares the version in the tree against the latest release
           # tag to decide what to release, so it needs the tags.
           fetch-depth: 0
