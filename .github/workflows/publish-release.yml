@@ -1,0 +1,69 @@
+name: Publish release
+
+# Reusable workflow: the second half of a split knope release. The caller's
+# `draft-release` workflow prepared and pushed the version bump; this runs
+# knope's `Release` step once the artifacts to attach exist.
+#
+# With `assets` configured in knope.toml, that step creates the GitHub release
+# as a draft, uploads the assets, and only then publishes it. A draft is not
+# publicly visible, so a release never exists in the assetless state that makes
+# it uninstallable — `ubi` and anything else resolving a tag either sees a
+# finished release or no release at all.
+on:
+  workflow_call:
+    inputs:
+      artifact-path:
+        description: >-
+          Directory the build artifacts are downloaded into. Must match the
+          `assets` glob in knope.toml.
+        type: string
+        required: false
+        default: release
+      knope-workflow:
+        description: Name of the knope workflow that runs the Release step.
+        type: string
+        required: false
+        default: publish-release
+      knope-version:
+        type: string
+        required: false
+        default: "0.23.0"
+    secrets:
+      token:
+        description: >-
+          Token used to create the release. The default GITHUB_TOKEN is enough
+          unless the release must trigger further workflow runs.
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # knope compares the version in the tree against the latest release
+          # tag to decide what to release, so it needs the tags.
+          fetch-depth: 0
+
+      - name: Install knope
+        uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2
+        with:
+          # Test before updating, breaking changes likely:
+          # https://github.com/knope-dev/action#install-latest-version
+          version: ${{ inputs.knope-version }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: ${{ inputs.artifact-path }}
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.token || github.token }}
+        run: |
+          set -euo pipefail
+          ls -l '${{ inputs.artifact-path }}'
+          knope '${{ inputs.knope-workflow }}' --verbose

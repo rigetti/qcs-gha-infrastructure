@@ -18,6 +18,14 @@ on:
         type: string
         required: false
         default: "0.23.0"
+      knope-workflow:
+        description: >-
+          Name of the knope workflow to run. Override this when the release is
+          split across workflows — a `draft-release` that prepares and pushes,
+          and a `publish-release` run later, once the artifacts to attach exist.
+        type: string
+        required: false
+        default: release
       default-branch:
         description: >-
           Branch that releases automatically, and which therefore cannot be
@@ -78,4 +86,4 @@ jobs:
           set -euo pipefail
           label="${PRERELEASE_LABEL:-rc}"
           echo "Running prerelease with label '${label}' on ${GITHUB_REF}"
-          knope release --verbose "--prerelease-label=${label}"
+          knope '${{ inputs.knope-workflow }}' --verbose "--prerelease-label=${label}"

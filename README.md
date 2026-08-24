@@ -174,6 +174,56 @@ jobs:
 downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
 new workflow runs.
 
+### `publish-release.yml`
+
+The second half of a **split release**, for repositories that attach build
+artifacts. The caller's `draft-release` knope workflow prepares and pushes the
+version bump; this runs knope's `Release` step afterwards, once the artifacts
+exist.
+
+```yaml
+jobs:
+  build:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.2.0
+    with:
+      bin: my-cli
+
+  publish:
+    needs: build
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.2.0
+```
+
+with knope.toml split to match:
+
+```toml
+[package]
+assets = "release/*"
+
+[[workflows]]
+name = "draft-release"
+# PrepareRelease, commit, push — no Release step.
+
+[[workflows]]
+name = "publish-release"
+# The Release step alone.
+```
+
+**Why split it.** With `assets` configured, knope's `Release` step creates the
+release as a draft, uploads the assets, and only then publishes. Drafts are not
+publicly visible, so the release never exists in the assetless state that makes
+it uninstallable — ubi reports that as `could not find a release asset after
+filtering for valid extensions`, and the window lasts as long as a
+cross-platform build. Publishing at prepare time instead leaves every consumer
+pinning the new tag broken for those minutes.
+
+Point `prepare-release.yml` and `prepare-prerelease.yml` at the first half with
+their `knope-workflow` input:
+
+```yaml
+    with:
+      knope-workflow: draft-release
+```
+
 ### `prepare-prerelease.yml`
 
 The manual half: cuts a release candidate from the branch it is dispatched on,
