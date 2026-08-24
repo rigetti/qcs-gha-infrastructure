@@ -375,6 +375,7 @@ should share, and `scripts/apply-ruleset` applies it:
 ```bash
 scripts/apply-ruleset rigetti/my-repo                   # create or update
 DRY_RUN=1 scripts/apply-ruleset rigetti/my-repo         # show the diff first
+REPLACE_CHECKS=1 scripts/apply-ruleset rigetti/my-repo  # also impose the checks
 scripts/apply-ruleset rigetti/my-repo rulesets/other.json
 ```
 
@@ -383,13 +384,21 @@ same document the UI exports. The script matches an existing ruleset **by
 name** and PUTs over it, or POSTs a new one: ids are per-repository, so a shared
 file cannot carry one.
 
-What it enforces: no deletion, no force-push, pull requests with one approving
-review and thread resolution, and one required status check — **`CI gate`**. A single aggregate
-check is deliberate. Requiring individual jobs breaks every pull request that
-legitimately skips one, because a skipped check counts as neutral rather than
-passing: fork pull requests, which never receive secrets, and Dependabot's,
-which receive only Dependabot secrets. See `rust-ci.yml` and the `CI gate`
-pattern in `todo-curator`'s `ci.yml`.
+What it enforces: no deletion, no force-push, and pull requests with one
+approving review and thread resolution.
+
+**Required status checks are left alone when updating an existing ruleset.**
+Check names come from a repository's own job and workflow names, so they vary
+and a shared file has no business overwriting them. The rule in the file only
+seeds a repository that has no ruleset yet; `REPLACE_CHECKS=1` imposes it
+anyway. A run prints the checks it preserved, so it says plainly what it left
+alone.
+
+That seed is a single aggregate check, **`CI gate`**, and the reason is worth
+repeating: requiring individual jobs breaks every pull request that legitimately
+skips one, because a skipped check counts as neutral rather than passing — fork
+pull requests, which never receive secrets, and Dependabot's, which receive only
+Dependabot secrets. See the `CI gate` job in `todo-curator`'s `ci.yml`.
 
 Adopting it in a repository that already has a differently-named ruleset creates
 a *second* one rather than replacing it. Rename the existing ruleset to
