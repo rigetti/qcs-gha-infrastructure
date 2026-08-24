@@ -14,17 +14,13 @@ on:
         required: true
       matrix:
         description: >-
-          JSON array of `{"runs-on": …, "target": …}` objects. Defaults to musl
-          Linux on both architectures, arm64 macOS, and x86_64 Windows.
+          JSON array of `{"runs-on": …, "target": …}` objects. Empty means the
+          default: musl Linux on both architectures, arm64 macOS, and x86_64
+          Windows. Empty rather than a literal default so that a workflow
+          forwarding this input can pass through "no opinion".
         type: string
         required: false
-        default: |
-          [
-            {"runs-on": "ubuntu-latest",    "target": "x86_64-unknown-linux-musl"},
-            {"runs-on": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-musl"},
-            {"runs-on": "macos-14",         "target": "aarch64-apple-darwin"},
-            {"runs-on": "windows-latest",   "target": "x86_64-pc-windows-msvc"}
-          ]
+        default: ""
       toolchain:
         type: string
         required: false
@@ -47,7 +43,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.matrix) }}
+        include: >-
+          ${{ fromJSON(inputs.matrix != '' && inputs.matrix || '[
+            {"runs-on": "ubuntu-latest",    "target": "x86_64-unknown-linux-musl"},
+            {"runs-on": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-musl"},
+            {"runs-on": "macos-14",         "target": "aarch64-apple-darwin"},
+            {"runs-on": "windows-latest",   "target": "x86_64-pc-windows-msvc"}
+          ]') }}
     runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -59,7 +61,7 @@ jobs:
       - name: Use a short target directory
         shell: bash
         run: echo "CARGO_TARGET_DIR=${RUNNER_TEMP}/t" >> "${GITHUB_ENV}"
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.2.1
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.3.0
         with:
           toolchain: ${{ inputs.toolchain }}
           targets: ${{ matrix.target }}

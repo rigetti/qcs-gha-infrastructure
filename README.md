@@ -91,7 +91,87 @@ jobs:
 `CARGO_TARGET_DIR` is moved under `RUNNER_TEMP` so deep dependency trees do not
 overrun Windows' path limit.
 
+### `rust-cli-release.yml` and `rust-cli-prerelease.yml`
+
+The whole **release-with-assets** pattern, for a repository that ships
+binaries. Most callers want these two rather than the pieces they compose
+(`rust-cli-build.yml`, `prepare-*.yml`, `publish-release.yml`).
+
+```yaml
+# .github/workflows/cli-release.yml — on merge to the release branch
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-release.yml@v0.3.0
+    with:
+      bin: my-cli
+    secrets:
+      token: ${{ secrets.RELEASE_TOKEN }}
+```
+
+```yaml
+# .github/workflows/prepare-prerelease.yml — cut a release candidate
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease-label:
+        description: "Prerelease label; defaults to 'rc'."
+        required: false
+        default: ""
+
+jobs:
+  prerelease:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-prerelease.yml@v0.3.0
+    with:
+      bin: my-cli
+      prerelease-label: ${{ inputs.prerelease-label }}
+    secrets:
+      token: ${{ secrets.RELEASE_TOKEN }}
+```
+
+with a knope.toml split into the two halves:
+
+```toml
+[package]
+versioned_files = ["Cargo.toml", "Cargo.lock"]
+changelog = "CHANGELOG.md"
+assets = "release/*"
+
+[github]
+owner = "rigetti"
+repo = "my-cli"
+
+[[workflows]]
+name = "draft-release"
+# PrepareRelease, then `git commit`, then `git push`. No Release step.
+
+[[workflows]]
+name = "publish-release"
+# The Release step alone.
+```
+
+**Why it is built this way.** With `assets` configured, knope's `Release` step
+creates the release as a draft, uploads the assets, and publishes only then. Run
+at prepare time it would publish before any binary exists, and for the minutes a
+cross-platform build takes, every consumer pinning the new tag gets
+`could not find a release asset after filtering for valid extensions` from ubi —
+or an empty release page. Deferring `Release` until the artifacts exist closes
+that window for everyone, not just for CI.
+
+`rust-cli-prerelease.yml` runs all three stages in one workflow because a
+prerelease commit lands on a feature branch, where a push-triggered release
+workflow watching the default branch can never fire. It also passes
+`ref: ${{ github.ref }}` to every stage after the first: on
+`workflow_dispatch`, checkout otherwise uses the commit the run started at,
+which predates the bump.
+
 ### `rust-integration-tests.yml`
+
+
 
 Runs a test command that needs credentials, optionally under a GitHub
 environment so that untrusted code waits for a maintainer's approval.

@@ -1,0 +1,80 @@
+name: Rust CLI release
+
+# Reusable workflow: the second half of a split release for a repository that
+# ships binaries. Builds the CLI for every platform, then runs knope's Release
+# step over those artifacts.
+#
+# Pair it with prepare-release.yml, whose `draft-release` knope workflow bumps
+# the version and pushes; that push is what triggers a caller of this one.
+#
+# The split is what keeps a release from ever being visible without the
+# binaries that make it installable: with `assets` configured, knope's Release
+# step creates the release as a draft, uploads them, and publishes only then.
+on:
+  workflow_call:
+    inputs:
+      bin:
+        description: Name of the binary to build, as `cargo build -p` expects it.
+        type: string
+        required: true
+      matrix:
+        description: Platform matrix; see rust-cli-build.yml for the default.
+        type: string
+        required: false
+        default: ""
+      toolchain:
+        type: string
+        required: false
+        default: stable
+      artifact-path:
+        description: Directory the artifacts are gathered into; must match `assets` in knope.toml.
+        type: string
+        required: false
+        default: release
+      knope-workflow:
+        description: Name of the knope workflow that runs the Release step.
+        type: string
+        required: false
+        default: publish-release
+      knope-version:
+        type: string
+        required: false
+        default: "0.23.0"
+      release-commit-prefix:
+        description: >-
+          Commit-message prefix marking the release commit that this should act
+          on. Must match the message in knope.toml's commit step.
+        type: string
+        required: false
+        default: "chore: prepare release"
+    secrets:
+      token:
+        description: >-
+          Token used to publish the release. A PAT or app token if publishing
+          must trigger further workflow runs; otherwise the job's own token.
+        required: false
+
+jobs:
+  build:
+    # A manual dispatch builds without publishing, which is a useful way to
+    # check the build matrix without cutting a release.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || startsWith(github.event.head_commit.message, inputs.release-commit-prefix)
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.3.0
+    with:
+      bin: ${{ inputs.bin }}
+      matrix: ${{ inputs.matrix }}
+      toolchain: ${{ inputs.toolchain }}
+
+  publish:
+    needs: build
+    # Only a release commit has a version to publish.
+    if: startsWith(github.event.head_commit.message, inputs.release-commit-prefix)
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.3.0
+    with:
+      artifact-path: ${{ inputs.artifact-path }}
+      knope-workflow: ${{ inputs.knope-workflow }}
+      knope-version: ${{ inputs.knope-version }}
+    secrets:
+      token: ${{ secrets.token }}

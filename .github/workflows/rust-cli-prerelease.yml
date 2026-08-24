@@ -1,0 +1,93 @@
+name: Rust CLI prerelease
+
+# Reusable workflow: cut a release candidate from the branch it is dispatched
+# on — bump, build, publish — for a repository that ships binaries.
+#
+# This runs all three stages itself rather than leaving the second half to a
+# push-triggered workflow. A prerelease commit lands on a feature branch, and a
+# release workflow triggered by pushes to the default branch can never fire for
+# it: that gap silently produced prerelease commits with no tag, no release,
+# and no assets.
+on:
+  workflow_call:
+    inputs:
+      bin:
+        description: Name of the binary to build, as `cargo build -p` expects it.
+        type: string
+        required: true
+      prerelease-label:
+        description: Label for the prerelease, e.g. `beta` gives 1.2.3-beta.0. Defaults to `rc`.
+        type: string
+        required: false
+        default: ""
+      matrix:
+        description: Platform matrix; see rust-cli-build.yml for the default.
+        type: string
+        required: false
+        default: ""
+      toolchain:
+        type: string
+        required: false
+        default: stable
+      artifact-path:
+        description: Directory the artifacts are gathered into; must match `assets` in knope.toml.
+        type: string
+        required: false
+        default: release
+      draft-knope-workflow:
+        description: knope workflow that bumps and pushes, without releasing.
+        type: string
+        required: false
+        default: draft-release
+      publish-knope-workflow:
+        description: knope workflow that runs the Release step.
+        type: string
+        required: false
+        default: publish-release
+      knope-version:
+        type: string
+        required: false
+        default: "0.23.0"
+      default-branch:
+        description: Branch that releases automatically, and so cannot be prereleased by hand.
+        type: string
+        required: false
+        default: main
+    secrets:
+      token:
+        description: >-
+          Token used to push the prerelease commit and publish the release.
+        required: true
+
+jobs:
+  draft:
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-prerelease.yml@v0.3.0
+    with:
+      prerelease-label: ${{ inputs.prerelease-label }}
+      knope-workflow: ${{ inputs.draft-knope-workflow }}
+      knope-version: ${{ inputs.knope-version }}
+      default-branch: ${{ inputs.default-branch }}
+    secrets:
+      token: ${{ secrets.token }}
+
+  # Every later stage checks out the branch rather than the ref this run
+  # started at, which predates the version bump the draft stage just pushed.
+  build:
+    needs: draft
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.3.0
+    with:
+      bin: ${{ inputs.bin }}
+      matrix: ${{ inputs.matrix }}
+      toolchain: ${{ inputs.toolchain }}
+      ref: ${{ github.ref }}
+
+  publish:
+    needs: build
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.3.0
+    with:
+      artifact-path: ${{ inputs.artifact-path }}
+      knope-workflow: ${{ inputs.publish-knope-workflow }}
+      knope-version: ${{ inputs.knope-version }}
+      ref: ${{ github.ref }}
+    secrets:
+      token: ${{ secrets.token }}
