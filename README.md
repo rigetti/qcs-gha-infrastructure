@@ -383,8 +383,8 @@ same document the UI exports. The script matches an existing ruleset **by
 name** and PUTs over it, or POSTs a new one: ids are per-repository, so a shared
 file cannot carry one.
 
-What it enforces: no deletion, no force-push, pull requests required with thread
-resolution, and one required status check — **`CI gate`**. A single aggregate
+What it enforces: no deletion, no force-push, pull requests with one approving
+review and thread resolution, and one required status check — **`CI gate`**. A single aggregate
 check is deliberate. Requiring individual jobs breaks every pull request that
 legitimately skips one, because a skipped check counts as neutral rather than
 passing: fork pull requests, which never receive secrets, and Dependabot's,
