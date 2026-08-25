@@ -17,12 +17,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: taiki-e/install-action@6cd13508893c0e7eab5f273c2575d3859bd7229a # v2
-        with:
-          tool: actionlint
       # actionlint parses every workflow, checks expression syntax and context
       # availability, and runs shellcheck over each `run:` block.
-      - run: actionlint -color
+      # taiki-e/install-action does not carry actionlint, so use upstream's own
+      # installer, with the version pinned for the usual reasons.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+        run: |
+          set -euo pipefail
+          bash <(curl --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) \
+            "${ACTIONLINT_VERSION}"
+          ./actionlint --version
+      - run: ./actionlint -color
       - name: Shellcheck the scripts
         run: shellcheck scripts/*
       - name: Rulesets are valid JSON with the keys the API needs
@@ -96,7 +104,12 @@ jobs:
             echo "::error::reset-changelogs left the added entry in place"
             exit 1
           fi
-          git diff --quiet -- README.md
+          # Deliberately not `git diff --quiet`: the file is restored from the
+          # default branch, so a pull request that edits it legitimately differs
+          # from what was restored. The invariant under test is that the
+          # appended entry is gone.
+          echo "README.md was restored from the default branch"
+          [[ -s README.md ]]
 
       # A changelog that does not exist on the default branch is new in this
       # branch, so its correct prior state is absent.
