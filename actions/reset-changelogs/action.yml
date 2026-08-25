@@ -42,7 +42,12 @@ runs:
         # knope.toml declares either one [package] or a [packages] table, each
         # optionally naming a changelog. tomllib ships with the runner's
         # Python, so this needs nothing installed.
-        mapfile -t changelogs < <(python3 - "${KNOPE_CONFIG}" <<'PY'
+        # A while-read loop rather than mapfile, which is bash 4 and so absent
+        # from the bash macOS ships; this should run the same locally.
+        changelogs=()
+        while IFS= read -r line; do
+          changelogs+=("${line}")
+        done < <(python3 - "${KNOPE_CONFIG}" <<'PY'
         import sys, tomllib
 
         with open(sys.argv[1], "rb") as f:
