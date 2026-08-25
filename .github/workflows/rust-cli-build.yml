@@ -61,7 +61,7 @@ jobs:
       - name: Use a short target directory
         shell: bash
         run: echo "CARGO_TARGET_DIR=${RUNNER_TEMP}/t" >> "${GITHUB_ENV}"
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.4.0
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.4.1
         with:
           toolchain: ${{ inputs.toolchain }}
           targets: ${{ matrix.target }}

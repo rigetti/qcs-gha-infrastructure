@@ -1,6 +1,6 @@
 # qcs-gha-infrastructure
 
-[![Latest release](https://img.shields.io/github/v/release/rigetti/qcs-gha-infrastructure)](https://github.com/rigetti/qcs-gha-infrastructure/releases/tag/v0.4.0)
+[![Latest release](https://img.shields.io/github/v/release/rigetti/qcs-gha-infrastructure)](https://github.com/rigetti/qcs-gha-infrastructure/releases/tag/v0.4.1)
 
 Shared GitHub Actions and reusable workflows for QCS repositories.
 
