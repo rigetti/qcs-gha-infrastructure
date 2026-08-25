@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Offline tests for apply-ruleset's argument handling. No network, no gh.
+#
+#   scripts/test-apply-ruleset
+#   BASH=/bin/bash scripts/test-apply-ruleset   # check an older bash
+
+set -euo pipefail
+
+script="$(dirname "$0")/apply-ruleset"
+failures=0
+
+# repo_slug is the part worth testing: everything else talks to the API.
+eval "$(sed -n '/^repo_slug()/,/^}/p' "${script}")"
+
+expect_slug() {
+    local input="$1" want="$2" got
+    if ! got="$(repo_slug "${input}")"; then
+        echo "FAIL ${input}: rejected, wanted ${want}"
+        failures=$((failures + 1))
+        return
+    fi
+    if [[ "${got}" != "${want}" ]]; then
+        echo "FAIL ${input}: got ${got}, wanted ${want}"
+        failures=$((failures + 1))
+        return
+    fi
+    echo "ok   ${input} -> ${got}"
+}
+
+expect_reject() {
+    local input="$1"
+    if repo_slug "${input}" >/dev/null 2>&1; then
+        echo "FAIL ${input}: accepted, wanted rejection"
+        failures=$((failures + 1))
+        return
+    fi
+    echo "ok   ${input} -> rejected"
+}
+
+# Hyphens matter: \w would reject every repository named like these.
+expect_slug "rigetti/todo-curator" "rigetti/todo-curator"
+expect_slug "rigetti/qcs-gha-infrastructure" "rigetti/qcs-gha-infrastructure"
+expect_slug "rigetti/repo.with.dots" "rigetti/repo.with.dots"
+expect_slug "https://github.com/rigetti/todo-curator" "rigetti/todo-curator"
+expect_slug "https://github.com/rigetti/todo-curator.git" "rigetti/todo-curator"
+expect_slug "https://github.com/rigetti/todo-curator/" "rigetti/todo-curator"
+expect_slug "git@github.com:rigetti/todo-curator.git" "rigetti/todo-curator"
+expect_slug "ssh://git@github.com/rigetti/todo-curator.git" "rigetti/todo-curator"
+expect_slug "github.com/rigetti/todo-curator" "rigetti/todo-curator"
+
+expect_reject "https://gitlab.com/rigetti/qcs/utilities/todo-curator.git"
+expect_reject "nonsense"
+expect_reject "one/two/three"
+expect_reject ""
+
+# --help must work, and a missing argument must fail rather than act.
+if "${script}" --help >/dev/null 2>&1; then
+    echo "ok   --help exits 0"
+else
+    echo "FAIL --help did not exit 0"
+    failures=$((failures + 1))
+fi
+
+if "${script}" >/dev/null 2>&1; then
+    echo "FAIL no arguments should exit non-zero"
+    failures=$((failures + 1))
+else
+    echo "ok   no arguments exits non-zero"
+fi
+
+if [[ "${failures}" -gt 0 ]]; then
+    echo "${failures} failure(s)"
+    exit 1
+fi
+echo "all passed"
