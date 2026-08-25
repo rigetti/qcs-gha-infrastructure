@@ -8,9 +8,12 @@ usage() {
 Apply a ruleset JSON file to a repository, creating it or updating the existing
 ruleset of the same name.
 
-usage: apply-ruleset [-h|--help] OWNER/REPO [RULESET_JSON]
+usage: apply-ruleset [-h|--help] REPO [RULESET_JSON]
 
-  OWNER/REPO      Repository to apply the ruleset to, e.g. rigetti/todo-curator.
+  REPO            Repository to apply the ruleset to, as OWNER/REPO or a GitHub
+                  URL: rigetti/todo-curator,
+                  https://github.com/rigetti/todo-curator.git, or
+                  git@github.com:rigetti/todo-curator.git all work.
   RULESET_JSON    Ruleset to apply. Defaults to rulesets/default-branch.json
                   next to this script.
 
@@ -52,12 +55,45 @@ for arg in "$@"; do
     esac
 done
 
-repo="${1:-}"
+# Accept either OWNER/REPO or a GitHub URL. Note the character class: repository
+# and owner names routinely contain hyphens and dots (qcs-gha-infrastructure),
+# which \w does not match.
+repo_slug() {
+    local input="${1}" trimmed
+
+    if [[ "${input}" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+        printf '%s\n' "${input}"
+        return 0
+    fi
+
+    # Strip a trailing .git and any trailing slash, so the repository name is
+    # the last path component whichever URL form was given.
+    trimmed="${input%/}"
+    trimmed="${trimmed%.git}"
+
+    if [[ "${trimmed}" =~ github\.com[:/]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$ ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+        return 0
+    fi
+
+    return 1
+}
+
+repo_arg="${1:-}"
 file="${2:-$(dirname "$0")/../rulesets/default-branch.json}"
 
-if [[ -z "${repo}" ]]; then
+if [[ -z "${repo_arg}" ]]; then
     usage >&2
     exit 2
+fi
+
+if ! repo="$(repo_slug "${repo_arg}")"; then
+    echo "Not a repository or GitHub URL: ${repo_arg}" >&2
+    exit 2
+fi
+
+if [[ "${repo}" != "${repo_arg}" ]]; then
+    echo "Using ${repo}"
 fi
 
 if [[ ! -f "${file}" ]]; then
