@@ -391,18 +391,16 @@ pull request, where the checkout is a merge ref, it finds none and reads the
 version as `0.0.0`. A file in the tree is unambiguous wherever it is checked
 out, and a badge is a version someone actually looks at.
 
-The release also rewrites this repository's **internal pins**. Reusable
+The release also rewrites this repository's **internal pins**: the reusable
 workflows reference this repository's own actions by tag, and those references
-must name the version being released, in the very commit the tag will point at
-— otherwise a caller pinning a workflow at `v1.2.3` gets the previous version's
-action underneath it, silently. `scripts/internal-pins` does that rewrite, and
-the `lint` job checks it:
+must name the version being released, in the commit the tag will point at —
+otherwise a caller pinning a workflow at `v1.2.3` gets the previous version's
+action underneath it, silently.
 
-```bash
-scripts/internal-pins list          # every internal reference and its version
-scripts/internal-pins check         # all pins agree with the latest tag
-scripts/internal-pins set v1.2.3    # rewrite them
-```
+Each such file is declared in `versioned_files`, so knope rewrites them and
+refuses to release when any disagrees. One regex covers every occurrence in a
+file. The only remaining gap is a *new* file carrying a pin that `knope.toml`
+does not mention, which the `lint` job checks for.
 
 ## Self-checks
 

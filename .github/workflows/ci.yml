@@ -36,10 +36,24 @@ jobs:
       - run: ./actionlint -color
       - name: Shellcheck the scripts
         run: shellcheck scripts/*
-      # A caller pinning a workflow at a tag gets whatever that workflow
-      # references underneath, so a stale internal pin silently serves old code.
-      - name: Internal references pin the latest release
-        run: scripts/internal-pins check
+      # knope rewrites the internal action references at release time and
+      # refuses to release when they disagree, so the only gap left is a file
+      # carrying a pin that knope.toml does not declare.
+      - name: Every internal reference is declared in knope.toml
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r file; do
+            if ! grep -q "\"${file}\"" knope.toml; then
+              echo "${file} references this repository but is not in knope.toml"
+              missing=1
+            fi
+          done < <(grep -rl 'qcs-gha-infrastructure/[^@]*@v' .github/workflows actions | sort)
+          if [[ "${missing}" -ne 0 ]]; then
+            echo "::error::Add the file(s) above to versioned_files, or their pins will never be updated."
+            exit 1
+          fi
+          echo "All files referencing this repository are declared."
 
       - name: Rulesets are valid JSON with the keys the API needs
         run: |

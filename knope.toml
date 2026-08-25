@@ -10,6 +10,20 @@
 [package]
 versioned_files = [
     { path = "README.md", regex = 'releases/tag/v(?<version>\d+\.\d+\.\d+.*)\)' },
+
+    # The reusable workflows reference this repository's own actions by tag, and
+    # those references must name the version being released, in the commit the
+    # tag will point at — otherwise a caller pinning a workflow at v1.2.3 gets
+    # the previous version's action underneath it, silently. Declaring them here
+    # means knope rewrites them, and refuses to release if any disagrees.
+    # One regex updates every occurrence in a file.
+    { path = ".github/workflows/prepare-prerelease.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/prepare-release.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/rust-ci.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/rust-cli-build.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/rust-cli-prerelease.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/rust-cli-release.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/rust-integration-tests.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
 ]
 changelog = "CHANGELOG.md"
 
@@ -23,19 +37,9 @@ name = "release"
 [[workflows.steps]]
 type = "PrepareRelease"
 
-# The reusable workflows here reference this repository's own actions by tag.
-# Those references have to name the version being released, in the very commit
-# the tag will point at: a caller pinning the workflow at v1.2.3 would
-# otherwise get the previous version's action underneath it, silently.
 [[workflows.steps]]
 type = "Command"
-command = "scripts/internal-pins set $version"
-
-[[workflows.steps]]
-type = "Command"
-# -a because the pin rewrite above is unstaged; PrepareRelease staged only the
-# changelog.
-command = 'git commit -am "chore: prepare release $version"'
+command = 'git commit -m "chore: prepare release $version"'
 
 # Push before Release: with a forge configured, Release publishes through the
 # API, and GitHub rejects a release whose target commit it has never seen.
