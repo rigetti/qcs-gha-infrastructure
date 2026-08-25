@@ -149,7 +149,9 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [lint, scripts, setup-rust, reset-changelogs, release]
+    # Only jobs in this workflow: `needs` cannot reach across workflows. The
+    # release dry-run in release.yml reports its own check.
+    needs: [lint, scripts, setup-rust, reset-changelogs]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results
