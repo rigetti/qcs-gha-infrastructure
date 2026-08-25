@@ -451,6 +451,21 @@ skips one, because a skipped check counts as neutral rather than passing — for
 pull requests, which never receive secrets, and Dependabot's, which receive only
 Dependabot secrets. See the `CI gate` job in `todo-curator`'s `ci.yml`.
 
+**A repository that releases from CI needs a bypass entry.** The `pull_request`
+rule rejects the push knope makes, with `Changes must be made through a pull
+request`. The default file ships a bypass for the repository-admin role in
+`pull_request` mode, which does *not* cover a direct push; add whoever performs
+releases — the PAT's owner, a GitHub App, or the Actions app itself — with
+`bypass_mode: always`:
+
+```json
+{ "actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always" }
+```
+
+Actor 15368 is GitHub Actions. Granting it a bypass means any workflow in the
+repository can push to the release branch; the alternative is a PAT whose owner
+has the bypass, which narrows what can push but adds a secret to rotate.
+
 Adopting it in a repository that already has a differently-named ruleset creates
 a *second* one rather than replacing it. Rename the existing ruleset to
 `default branch` first, or delete it.

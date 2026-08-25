@@ -80,15 +80,26 @@ jobs:
       # actions/checkout rejects it outright. Fall back to the job's own token.
       # The release path cannot accept that fallback, hence the check below.
       # The secrets context is not available to an `if`, so the test is here.
-      - name: Require a real token for an actual release
-        if: github.event_name == 'push'
+      # On a pull request this only warns: a dry run needs no token, and a
+      # warning on the pull request is where you want to learn that the release
+      # after it would fail.
+      - name: Check for a release token
         env:
           TOKEN: ${{ secrets.token }}
         run: |
-          if [[ -z "${TOKEN}" ]]; then
-            echo "::error::A release needs the 'token' secret: a PAT or app token, so the release push triggers downstream workflows."
+          if [[ -n "${TOKEN}" ]]; then
+            exit 0
+          fi
+          message="No 'token' secret. A release needs one: a token that may push"
+          message="${message} to the release branch, and a PAT or app token if that"
+          message="${message} push must trigger further workflows. Note that a branch"
+          message="${message} ruleset also needs a bypass entry for whoever pushes,"
+          message="${message} or the push is rejected as needing a pull request."
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "::error::${message}"
             exit 1
           fi
+          echo "::warning::${message}"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
