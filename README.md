@@ -373,8 +373,12 @@ knope, driven by this repository's own `prepare-release.yml` — the same workfl
 the other QCS repositories call. A pull request dry-runs the release; merging it
 cuts one.
 
-There is no manifest to version here, so `versioned_files` is empty and the Git
-tag is the only source of truth.
+There is no manifest to version here, so a bare `VERSION` file stands in, read
+through a regex `versioned_files` entry. Leaving `versioned_files` empty would
+make the Git tags the only source of truth, and knope decides which tags count
+by which branch contains them — on a pull request, where the checkout is a merge
+ref, it finds none and reads the version as `0.0.0`. A file in the tree is
+unambiguous wherever it is checked out.
 
 The release also rewrites this repository's **internal pins**. Reusable
 workflows reference this repository's own actions by tag, and those references

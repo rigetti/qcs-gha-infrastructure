@@ -105,6 +105,17 @@ jobs:
       # Repeated prereleases from one branch would otherwise accumulate
       # changelog entries: each PrepareRelease writes the pending changes on
       # top of what the previous one already wrote.
+      # knope decides which tags count by asking which branch contains them, and
+      # a pull_request checkout is a detached HEAD at the merge ref — no branch
+      # contains anything, so every tag is skipped and a repository whose
+      # version comes from tags alone reads as 0.0.0. Naming the commit gives
+      # knope a branch to find.
+      - name: Put the checkout on a branch
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+        run: git checkout -B "knope-pr-${PR_NUMBER}"
+
       - name: Reset changelogs
         uses: rigetti/qcs-gha-infrastructure/actions/reset-changelogs@v0.4.0
         with:
