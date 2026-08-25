@@ -1,0 +1,47 @@
+# This repository has no manifest to version — it ships workflows and actions,
+# not a package — so the Git tag is the only source of truth and
+# `versioned_files` is empty. knope reads the current version from the tags.
+[package]
+versioned_files = []
+changelog = "CHANGELOG.md"
+
+[github]
+owner = "rigetti"
+repo = "qcs-gha-infrastructure"
+
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+
+# The reusable workflows here reference this repository's own actions by tag.
+# Those references have to name the version being released, in the very commit
+# the tag will point at: a caller pinning the workflow at v1.2.3 would
+# otherwise get the previous version's action underneath it, silently.
+[[workflows.steps]]
+type = "Command"
+command = "scripts/internal-pins set $version"
+
+[[workflows.steps]]
+type = "Command"
+# -a because the pin rewrite above is unstaged; PrepareRelease staged only the
+# changelog.
+command = 'git commit -am "chore: prepare release $version"'
+
+# Push before Release: with a forge configured, Release publishes through the
+# API, and GitHub rejects a release whose target commit it has never seen.
+[[workflows.steps]]
+type = "Command"
+command = "git push"
+
+[[workflows.steps]]
+type = "Release"
+
+[[workflows]]
+name = "get-version"
+help_text = "Get the current version of this repository"
+
+[[workflows.steps]]
+type = "Command"
+command = 'echo "$version"'

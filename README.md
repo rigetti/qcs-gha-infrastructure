@@ -367,6 +367,28 @@ Ported from the `knope.yaml` job template in the GitLab `qcs-infrastructure`
 repository, which used `tomlq`; this reads `knope.toml` with the runner's own
 Python instead, so nothing needs installing.
 
+## Releasing
+
+knope, driven by this repository's own `prepare-release.yml` — the same workflow
+the other QCS repositories call. A pull request dry-runs the release; merging it
+cuts one.
+
+There is no manifest to version here, so `versioned_files` is empty and the Git
+tag is the only source of truth.
+
+The release also rewrites this repository's **internal pins**. Reusable
+workflows reference this repository's own actions by tag, and those references
+must name the version being released, in the very commit the tag will point at
+— otherwise a caller pinning a workflow at `v1.2.3` gets the previous version's
+action underneath it, silently. `scripts/internal-pins` does that rewrite, and
+the `lint` job checks it:
+
+```bash
+scripts/internal-pins list          # every internal reference and its version
+scripts/internal-pins check         # all pins agree with the latest tag
+scripts/internal-pins set v1.2.3    # rewrite them
+```
+
 ## Self-checks
 
 `.github/workflows/ci.yml` smoke-tests this repository's own actions on every

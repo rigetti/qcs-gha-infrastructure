@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # internal-pins compares against the latest tag.
+          fetch-depth: 0
       # actionlint parses every workflow, checks expression syntax and context
       # availability, and runs shellcheck over each `run:` block.
       # taiki-e/install-action does not carry actionlint, so use upstream's own
@@ -33,6 +36,11 @@ jobs:
       - run: ./actionlint -color
       - name: Shellcheck the scripts
         run: shellcheck scripts/*
+      # A caller pinning a workflow at a tag gets whatever that workflow
+      # references underneath, so a stale internal pin silently serves old code.
+      - name: Internal references pin the latest release
+        run: scripts/internal-pins check
+
       - name: Rulesets are valid JSON with the keys the API needs
         run: |
           set -euo pipefail
@@ -141,7 +149,7 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [lint, scripts, setup-rust, reset-changelogs]
+    needs: [lint, scripts, setup-rust, reset-changelogs, release]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results

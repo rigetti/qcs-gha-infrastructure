@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Read or rewrite the version this repository's workflows use to reference its
+# own actions and workflows.
+#
+#   scripts/internal-pins list          # every internal ref and its version
+#   scripts/internal-pins check         # all pins agree with the latest tag
+#   scripts/internal-pins set v1.2.3    # rewrite them
+#
+# The pins are why a release is a two-step change. A reusable workflow that
+# references `actions/setup-rust@v0.3.0` still resolves to v0.3.0 when a caller
+# pins the *workflow* at v0.4.0, so the references must be updated in the same
+# commit the new tag will point at. Getting that wrong is silent: everything
+# runs, just not the code the caller asked for.
+
+set -euo pipefail
+
+readonly SELF_REF='rigetti/qcs-gha-infrastructure/[^@]*@'
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+usage() {
+    sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+files() {
+    find "${root}/.github/workflows" "${root}/actions" \
+        -name '*.yml' -o -name '*.yaml' | sort
+}
+
+list_pins() {
+    local file
+    while IFS= read -r file; do
+        [[ -z "${file}" ]] && continue
+        grep -Hno "${SELF_REF}[^ ]*" "${file}" || true
+    done < <(files)
+}
+
+case "${1:-}" in
+    list)
+        list_pins | sed "s|${root}/||"
+        ;;
+    check)
+        latest="$(git -C "${root}" describe --tags --abbrev=0 2>/dev/null || true)"
+        if [[ -z "${latest}" ]]; then
+            echo "No tags yet; nothing to check."
+            exit 0
+        fi
+
+        bad=0
+        while IFS= read -r line; do
+            [[ -z "${line}" ]] && continue
+            ref="${line##*@}"
+            if [[ "${ref}" != "${latest}" ]]; then
+                echo "${line#"${root}/"} pins ${ref}, latest tag is ${latest}"
+                bad=1
+            fi
+        done < <(list_pins)
+
+        if [[ "${bad}" -ne 0 ]]; then
+            echo
+            echo "Internal references must point at the most recent release, or a" >&2
+            echo "caller pinning this repository gets an older action underneath." >&2
+            echo "Run: scripts/internal-pins set ${latest}" >&2
+            exit 1
+        fi
+        echo "All internal references pin ${latest}"
+        ;;
+    set)
+        version="${2:-}"
+        if [[ -z "${version}" ]]; then
+            echo "usage: $(basename "$0") set VERSION" >&2
+            exit 2
+        fi
+        [[ "${version}" == v* ]] || version="v${version}"
+
+        while IFS= read -r file; do
+            [[ -z "${file}" ]] && continue
+            perl -pi -e "s{(${SELF_REF})\\S+}{\${1}${version}}g" "${file}"
+        done < <(files)
+        echo "Internal references now pin ${version}"
+        ;;
+    -h|--help|"")
+        usage
+        ;;
+    *)
+        echo "Unknown command: ${1}" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
