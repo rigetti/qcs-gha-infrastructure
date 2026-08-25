@@ -102,26 +102,16 @@ jobs:
           # https://github.com/knope-dev/action#install-latest-version
           version: ${{ inputs.knope-version }}
 
-      # Repeated prereleases from one branch would otherwise accumulate
-      # changelog entries: each PrepareRelease writes the pending changes on
-      # top of what the previous one already wrote.
-      # knope decides which tags count by asking which branch contains them, and
-      # a pull_request checkout is a detached HEAD at the merge ref — no branch
-      # contains anything, so every tag is skipped and a repository whose
-      # version comes from tags alone reads as 0.0.0. Naming the commit gives
-      # knope a branch to find.
-      # knope decides which tags count by asking which branch contains them, and
-      # a pull_request checkout is a detached HEAD at the merge ref, which no
-      # branch contains. Naming it after the pull request's own branch gives
-      # knope something to find. The commit is still the merge of that branch
-      # into the base, which is what the checkout gave us and what the dry run
-      # should describe.
+      # Knope needs a branch to operate.
       - name: Name the checkout after the pull request's branch
         if: github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.head_ref }}
         run: git checkout -B "${HEAD_REF}"
 
+      # Repeated prereleases from one branch would otherwise accumulate
+      # changelog entries: each PrepareRelease writes the pending changes on
+      # top of what the previous one already wrote.
       - name: Reset changelogs
         uses: rigetti/qcs-gha-infrastructure/actions/reset-changelogs@v0.4.0
         with:

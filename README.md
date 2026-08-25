@@ -365,19 +365,12 @@ its own.
 
 A changelog that does not exist on the default branch is deleted rather than
 restored: it is new in this branch, so its correct prior state is absent.
-Ported from the `knope.yaml` job template in the GitLab `qcs-infrastructure`
-repository, which used `tomlq`; this reads `knope.toml` with the runner's own
-Python instead, so nothing needs installing.
 
 ## Releasing
 
 knope, driven by this repository's own `prepare-release.yml` — the same workflow
 the other QCS repositories call. A pull request dry-runs the release; merging it
 cuts one.
-
-There is no manifest to version here, so the release badge at the top of this
-file stands in — the same trick `qcs-infrastructure` uses, a raw regex over the
-link:
 
 ```toml
 versioned_files = [
