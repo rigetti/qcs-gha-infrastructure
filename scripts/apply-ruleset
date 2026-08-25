@@ -1,28 +1,62 @@
 #!/usr/bin/env bash
-# Apply a ruleset JSON file to a repository, creating it or updating the
-# existing ruleset of the same name.
-#
-#   scripts/apply-ruleset rigetti/my-repo
-#   scripts/apply-ruleset rigetti/my-repo rulesets/default-branch.json
-#   DRY_RUN=1 scripts/apply-ruleset rigetti/my-repo          # show the diff
-#   REPLACE_CHECKS=1 scripts/apply-ruleset rigetti/my-repo   # see below
-#
-# Matching on name rather than id is what makes this idempotent across
-# repositories: ruleset ids are per-repository, so a file cannot carry one.
-#
-# Required status checks are left alone when updating an existing ruleset.
-# Check names are per-repository — they come from that repository's own job and
-# workflow names — so a shared file has no business overwriting them. The rule
-# in the file seeds a repository that has no ruleset yet. Set REPLACE_CHECKS=1
-# to impose the file's checks anyway.
+# Apply a shared ruleset JSON file to a repository. See --help.
 
 set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Apply a ruleset JSON file to a repository, creating it or updating the existing
+ruleset of the same name.
+
+usage: apply-ruleset [-h|--help] OWNER/REPO [RULESET_JSON]
+
+  OWNER/REPO      Repository to apply the ruleset to, e.g. rigetti/todo-curator.
+  RULESET_JSON    Ruleset to apply. Defaults to rulesets/default-branch.json
+                  next to this script.
+
+environment:
+  DRY_RUN=1         Print what would change and exit. For an existing ruleset,
+                    this is a diff against what is live.
+  REPLACE_CHECKS=1  Also overwrite the repository's required status checks with
+                    the ones in the file. Off by default; see below.
+
+examples:
+  apply-ruleset rigetti/my-repo
+  DRY_RUN=1 apply-ruleset rigetti/my-repo
+  apply-ruleset rigetti/my-repo rulesets/other.json
+
+notes:
+  Rulesets are matched by name, not id: ids are per-repository, so a shared
+  file cannot carry one. A repository whose ruleset has a different name gets a
+  second ruleset rather than an updated one — rename it first.
+
+  Required status checks are left alone when updating. Check names come from a
+  repository's own job and workflow names, so a shared file has no business
+  overwriting them; the rule in the file only seeds a repository that has no
+  ruleset yet.
+
+  Needs `gh` authenticated with admin rights on the repository, and `jq`.
+
+  Org-level rulesets (orgs/ORG/rulesets) take the same JSON and cover many
+  repositories at once, without drifting per repository. Prefer them where you
+  have org-admin rights.
+USAGE
+}
+
+for arg in "$@"; do
+    case "${arg}" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+    esac
+done
 
 repo="${1:-}"
 file="${2:-$(dirname "$0")/../rulesets/default-branch.json}"
 
 if [[ -z "${repo}" ]]; then
-    echo "usage: $(basename "$0") OWNER/REPO [RULESET_JSON]" >&2
+    usage >&2
     exit 2
 fi
 
