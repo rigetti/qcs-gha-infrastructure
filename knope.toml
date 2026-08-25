@@ -1,13 +1,16 @@
 # This repository ships workflows and actions, not a package, so it has no
-# manifest to take a version from. A bare VERSION file stands in.
+# manifest to take a version from. The README's release badge stands in, the
+# way qcs-infrastructure versions its own.
 #
 # An empty `versioned_files` would leave the Git tags as the only source of
 # truth, and knope decides which tags count by which branch contains them: on a
 # pull request, where the checkout is a merge ref, it found none and read the
 # version as 0.0.0. A file in the tree is unambiguous wherever it is checked
-# out, and shows the current version to anyone reading the repository.
+# out, and this one shows the current version to anyone reading the repository.
 [package]
-versioned_files = [{ path = "VERSION", regex = '(?<version>\d+\.\d+\.\d+)' }]
+versioned_files = [
+    { path = "README.md", regex = 'releases/tag/v(?<version>\d+\.\d+\.\d+.*)\)' },
+]
 changelog = "CHANGELOG.md"
 
 [github]
