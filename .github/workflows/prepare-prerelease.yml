@@ -61,7 +61,7 @@ jobs:
           echo "::error::${DEFAULT_BRANCH} releases automatically when merged to; there is nothing to prerelease. Dispatch this from the branch you want a release candidate for."
           exit 1
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           # Prerelease the dispatched branch, so its tag lands on that branch.
