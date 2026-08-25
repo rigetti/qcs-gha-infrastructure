@@ -1,0 +1,143 @@
+name: CI
+
+# Smoke tests for this repository's own actions. Nothing here is exhaustive:
+# the point is that a change which breaks an action fails here rather than in a
+# consumer's pipeline.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: taiki-e/install-action@6cd13508893c0e7eab5f273c2575d3859bd7229a # v2
+        with:
+          tool: actionlint
+      # actionlint parses every workflow, checks expression syntax and context
+      # availability, and runs shellcheck over each `run:` block.
+      - run: actionlint -color
+      - name: Shellcheck the scripts
+        run: shellcheck scripts/*
+      - name: Rulesets are valid JSON with the keys the API needs
+        run: |
+          set -euo pipefail
+          for f in rulesets/*.json; do
+            echo "checking ${f}"
+            jq -e '.name and .target and .enforcement and .rules' "${f}" >/dev/null
+          done
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: scripts/test-apply-ruleset
+
+  # setup-rust is the action every Rust workflow here depends on, so check that
+  # it produces a working toolchain with the components it was asked for.
+  setup-rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        runs-on: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./actions/setup-rust
+        with:
+          components: clippy rustfmt
+          targets: x86_64-unknown-linux-musl
+          # Nothing to cache in this repository, and a cache entry per platform
+          # for an empty project is waste.
+          cache: "false"
+      - name: The toolchain and its components are usable
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo --version
+          rustc --version
+          cargo clippy --version
+          cargo fmt --version
+          rustup target list --installed | grep x86_64-unknown-linux-musl
+          # setup-rust sets these for every consumer; a change that drops them
+          # would silently disable sccache and slow every cached build.
+          [[ "${CARGO_TERM_COLOR}" == "always" ]]
+          [[ "${CARGO_INCREMENTAL}" == "0" ]]
+
+  reset-changelogs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      # A changelog tracked on the default branch must come back to its
+      # committed state, however it was mangled. The fixture config names
+      # README.md, which is tracked here by definition.
+      - name: A tracked changelog is restored
+        run: |
+          set -euo pipefail
+          echo "accumulated prerelease entry" >> README.md
+
+      - uses: ./actions/reset-changelogs
+        with:
+          knope-config: tests/fixtures/knope.toml
+
+      - name: Check it was restored
+        run: |
+          set -euo pipefail
+          if grep -q "accumulated prerelease entry" README.md; then
+            echo "::error::reset-changelogs left the added entry in place"
+            exit 1
+          fi
+          git diff --quiet -- README.md
+
+      # A changelog that does not exist on the default branch is new in this
+      # branch, so its correct prior state is absent.
+      - name: An untracked changelog is removed
+        run: |
+          set -euo pipefail
+          printf '[package]\nchangelog = "NEW-CHANGELOG.md"\n' > untracked-knope.toml
+          echo "brand new" > NEW-CHANGELOG.md
+
+      - uses: ./actions/reset-changelogs
+        with:
+          knope-config: untracked-knope.toml
+
+      - name: Check it was removed
+        run: |
+          set -euo pipefail
+          if [[ -e NEW-CHANGELOG.md ]]; then
+            echo "::error::reset-changelogs left an untracked changelog behind"
+            exit 1
+          fi
+
+      # A repository with no knope.toml must be a no-op, not an error.
+      - name: A missing config is not an error
+        run: rm -f untracked-knope.toml
+      - uses: ./actions/reset-changelogs
+        with:
+          knope-config: does-not-exist.toml
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs: [lint, scripts, setup-rust, reset-changelogs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "${RESULTS}" | jq .
+          if ! echo "${RESULTS}" | jq -e 'all(.[].result; . == "success")' >/dev/null; then
+            echo "::error::A required job did not succeed."
+            exit 1
+          fi

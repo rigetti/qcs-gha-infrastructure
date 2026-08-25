@@ -1,2 +1,6 @@
+# A file already tracked on the default branch stands in for a changelog:
+# the action restores whatever path knope.toml names, and using README.md means
+# this test works on the very first pull request, before any fixture of its own
+# has landed on the default branch.
 [package]
-changelog = "tests/fixtures/CHANGELOG.md"
+changelog = "README.md"

@@ -367,6 +367,29 @@ Ported from the `knope.yaml` job template in the GitLab `qcs-infrastructure`
 repository, which used `tomlq`; this reads `knope.toml` with the runner's own
 Python instead, so nothing needs installing.
 
+## Self-checks
+
+`.github/workflows/ci.yml` smoke-tests this repository's own actions on every
+pull request. Not exhaustive — the point is that a change breaking an action
+fails here rather than in a consumer's pipeline:
+
+- **lint** — `actionlint` over every workflow (which also runs shellcheck on each
+  `run:` block), `shellcheck` over `scripts/`, and a check that each ruleset JSON
+  parses and has the keys the API requires.
+- **scripts** — `scripts/test-apply-ruleset`, which covers argument handling
+  offline. Runnable locally, including under the bash macOS ships:
+  `/bin/bash scripts/test-apply-ruleset`.
+- **setup-rust** — installs a toolchain with components and an extra target on
+  Linux, macOS, and Windows, then checks `cargo`, `clippy`, `rustfmt`, the target
+  list, and the environment variables consumers depend on.
+- **reset-changelogs** — exercises all three paths: a tracked changelog is
+  restored, an untracked one is deleted, and a missing config is a no-op.
+
+Deliberately not here: a repository that consumes these workflows for real. The
+GitLab `qcs-infrastructure` triggers a downstream pipeline in `rust-template` to
+get that coverage; the equivalent is worth adding only if these smoke tests
+start missing things.
+
 ## Rulesets
 
 `rulesets/default-branch.json` is the default-branch protection QCS repositories
