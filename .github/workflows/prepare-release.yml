@@ -102,6 +102,13 @@ jobs:
           # https://github.com/knope-dev/action#install-latest-version
           version: ${{ inputs.knope-version }}
 
+      # Knope needs a branch to operate.
+      - name: Name the checkout after the pull request's branch
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: git checkout -B "${HEAD_REF}"
+
       # Repeated prereleases from one branch would otherwise accumulate
       # changelog entries: each PrepareRelease writes the pending changes on
       # top of what the previous one already wrote.

@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # internal-pins compares against the latest tag.
+          fetch-depth: 0
       # actionlint parses every workflow, checks expression syntax and context
       # availability, and runs shellcheck over each `run:` block.
       # taiki-e/install-action does not carry actionlint, so use upstream's own
@@ -33,6 +36,25 @@ jobs:
       - run: ./actionlint -color
       - name: Shellcheck the scripts
         run: shellcheck scripts/*
+      # knope rewrites the internal action references at release time and
+      # refuses to release when they disagree, so the only gap left is a file
+      # carrying a pin that knope.toml does not declare.
+      - name: Every internal reference is declared in knope.toml
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r file; do
+            if ! grep -q "\"${file}\"" knope.toml; then
+              echo "${file} references this repository but is not in knope.toml"
+              missing=1
+            fi
+          done < <(grep -rl 'qcs-gha-infrastructure/[^@]*@v' .github/workflows actions | sort)
+          if [[ "${missing}" -ne 0 ]]; then
+            echo "::error::Add the file(s) above to versioned_files, or their pins will never be updated."
+            exit 1
+          fi
+          echo "All files referencing this repository are declared."
+
       - name: Rulesets are valid JSON with the keys the API needs
         run: |
           set -euo pipefail
@@ -141,6 +163,8 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
+    # Only jobs in this workflow: `needs` cannot reach across workflows. The
+    # release dry-run in release.yml reports its own check.
     needs: [lint, scripts, setup-rust, reset-changelogs]
     runs-on: ubuntu-latest
     steps:

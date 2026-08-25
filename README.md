@@ -1,5 +1,7 @@
 # qcs-gha-infrastructure
 
+[![Latest release](https://img.shields.io/github/v/release/rigetti/qcs-gha-infrastructure)](https://github.com/rigetti/qcs-gha-infrastructure/releases/tag/v0.4.0)
+
 Shared GitHub Actions and reusable workflows for QCS repositories.
 
 ## Composite actions
@@ -363,9 +365,35 @@ its own.
 
 A changelog that does not exist on the default branch is deleted rather than
 restored: it is new in this branch, so its correct prior state is absent.
-Ported from the `knope.yaml` job template in the GitLab `qcs-infrastructure`
-repository, which used `tomlq`; this reads `knope.toml` with the runner's own
-Python instead, so nothing needs installing.
+
+## Releasing
+
+knope, driven by this repository's own `prepare-release.yml` — the same workflow
+the other QCS repositories call. A pull request dry-runs the release; merging it
+cuts one.
+
+```toml
+versioned_files = [
+    { path = "README.md", regex = 'releases/tag/v(?<version>\d+\.\d+\.\d+.*)\)' },
+]
+```
+
+Leaving `versioned_files` empty would make the Git tags the only source of
+truth, and knope decides which tags count by which branch contains them — on a
+pull request, where the checkout is a merge ref, it finds none and reads the
+version as `0.0.0`. A file in the tree is unambiguous wherever it is checked
+out, and a badge is a version someone actually looks at.
+
+The release also rewrites this repository's **internal pins**: the reusable
+workflows reference this repository's own actions by tag, and those references
+must name the version being released, in the commit the tag will point at —
+otherwise a caller pinning a workflow at `v1.2.3` gets the previous version's
+action underneath it, silently.
+
+Each such file is declared in `versioned_files`, so knope rewrites them and
+refuses to release when any disagrees. One regex covers every occurrence in a
+file. The only remaining gap is a *new* file carrying a pin that `knope.toml`
+does not mention, which the `lint` job checks for.
 
 ## Self-checks
 
