@@ -55,8 +55,10 @@ jobs:
       # This runs before checkout, so no token is used on the way to failing.
       - name: Refuse the default branch
         if: github.ref == format('refs/heads/{0}', inputs.default-branch)
+        env:
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
         run: |
-          echo "::error::${{ inputs.default-branch }} releases automatically when merged to; there is nothing to prerelease. Dispatch this from the branch you want a release candidate for."
+          echo "::error::${DEFAULT_BRANCH} releases automatically when merged to; there is nothing to prerelease. Dispatch this from the branch you want a release candidate for."
           exit 1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -81,17 +83,22 @@ jobs:
         with:
           default-branch: ${{ inputs.default-branch }}
 
+      # Through env, not interpolation: a shell script is not the place to
+      # expand a value from the event payload.
       - name: Configure git identity
+        env:
+          ACTOR: ${{ github.triggering_actor }}
         run: |
-          git config --global user.name '${{ github.triggering_actor }}'
-          git config --global user.email '${{ github.triggering_actor }}@users.noreply.github.com'
+          git config --global user.name "${ACTOR}"
+          git config --global user.email "${ACTOR}@users.noreply.github.com"
 
       - name: Prerelease
         env:
           GITHUB_TOKEN: ${{ secrets.token }}
           PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
+          KNOPE_WORKFLOW: ${{ inputs.knope-workflow }}
         run: |
           set -euo pipefail
           label="${PRERELEASE_LABEL:-rc}"
           echo "Running prerelease with label '${label}' on ${GITHUB_REF}"
-          knope '${{ inputs.knope-workflow }}' --verbose "--prerelease-label=${label}"
+          knope "${KNOPE_WORKFLOW}" --verbose "--prerelease-label=${label}"

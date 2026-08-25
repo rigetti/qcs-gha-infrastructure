@@ -81,15 +81,24 @@ jobs:
         shell: bash
         run: cargo build -p '${{ inputs.bin }}' --target '${{ matrix.target }}' --release
 
+      # Values reach the script through env rather than ${{ }} interpolation:
+      # shellcheck cannot reason about an interpolated literal — it reported the
+      # windows comparison as one that could never match — and interpolating
+      # into a shell script is how injection bugs start.
       - name: Stage the binary
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ inputs.bin }}
         run: |
           set -euo pipefail
           mkdir -p release
           ext=""
-          [[ '${{ matrix.target }}' == *windows* ]] && ext=".exe"
-          cp "${CARGO_TARGET_DIR}/${{ matrix.target }}/release/${{ inputs.bin }}${ext}" \
-             "release/${{ inputs.bin }}-${{ matrix.target }}${ext}"
+          if [[ "${TARGET}" == *windows* ]]; then
+            ext=".exe"
+          fi
+          cp "${CARGO_TARGET_DIR}/${TARGET}/release/${BIN}${ext}" \
+             "release/${BIN}-${TARGET}${ext}"
           chmod +x release/*
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -69,8 +69,10 @@ jobs:
       # rather than releasing from an unexpected ref.
       - name: Refuse events this workflow does not handle
         if: github.event_name != 'pull_request' && github.event_name != 'push'
+        env:
+          EVENT: ${{ github.event_name }}
         run: |
-          echo "::error::prepare-release.yml handles pull_request and push only; got ${{ github.event_name }}. Use prepare-prerelease.yml for a manual release candidate."
+          echo "::error::prepare-release.yml handles pull_request and push only; got ${EVENT}. Use prepare-prerelease.yml for a manual release candidate."
           exit 1
 
       # A dry run needs no privileged token, and Dependabot pull requests are
@@ -110,16 +112,23 @@ jobs:
 
       - name: Dry-run release
         if: github.event_name == 'pull_request'
-        run: knope ${{ inputs.knope-workflow }} --verbose --dry-run
+        env:
+          KNOPE_WORKFLOW: ${{ inputs.knope-workflow }}
+        run: knope "${KNOPE_WORKFLOW}" --verbose --dry-run
 
+      # Through env, not interpolation: a shell script is not the place to
+      # expand a value from the event payload.
       - name: Configure git identity
         if: github.event_name == 'push'
+        env:
+          ACTOR: ${{ github.triggering_actor }}
         run: |
-          git config --global user.name '${{ github.triggering_actor }}'
-          git config --global user.email '${{ github.triggering_actor }}@users.noreply.github.com'
+          git config --global user.name "${ACTOR}"
+          git config --global user.email "${ACTOR}@users.noreply.github.com"
 
       - name: Release
         if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.token }}
-        run: knope ${{ inputs.knope-workflow }} --verbose
+          KNOPE_WORKFLOW: ${{ inputs.knope-workflow }}
+        run: knope "${KNOPE_WORKFLOW}" --verbose

@@ -72,7 +72,9 @@ jobs:
       - name: Publish
         env:
           GITHUB_TOKEN: ${{ secrets.token || github.token }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          KNOPE_WORKFLOW: ${{ inputs.knope-workflow }}
         run: |
           set -euo pipefail
-          ls -l '${{ inputs.artifact-path }}'
-          knope '${{ inputs.knope-workflow }}' --verbose
+          ls -l "${ARTIFACT_PATH}"
+          knope "${KNOPE_WORKFLOW}" --verbose
