@@ -61,7 +61,7 @@ on:
 
 jobs:
   draft:
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-prerelease.yml@v0.4.1
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-prerelease.yml@v0.4.2
     with:
       prerelease-label: ${{ inputs.prerelease-label }}
       knope-workflow: ${{ inputs.draft-knope-workflow }}
@@ -74,7 +74,7 @@ jobs:
   # started at, which predates the version bump the draft stage just pushed.
   build:
     needs: draft
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.4.1
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.4.2
     with:
       bin: ${{ inputs.bin }}
       matrix: ${{ inputs.matrix }}
@@ -83,7 +83,7 @@ jobs:
 
   publish:
     needs: build
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.4.1
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.4.2
     with:
       artifact-path: ${{ inputs.artifact-path }}
       knope-workflow: ${{ inputs.publish-knope-workflow }}
