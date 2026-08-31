@@ -1,14 +1,18 @@
 version: 2
 updates:
-  # Every `uses:` here is pinned to a commit SHA, which is deliberate — see the
-  # Pinning section of the README — but a pin with no update path is just a
-  # stale dependency. Dependabot rewrites the SHA and the version comment
-  # together.
+  # Every `uses:` here is pinned to a commit SHA, which is deliberate
+  # (see the Pinning section of the README) but a pin with no update path
+  # is just a stale dependency.
+  # Dependabot rewrites the SHA and the version comment together.
   #
   # `directories` rather than `directory`: the github-actions ecosystem scans
   # `.github/workflows` under `/`, and a composite action's `action.yml` is
   # only seen when its own directory is listed.
+  #
+  # The `fix:` commit-message prefix ensures that updates are consumable downstream.
   - package-ecosystem: github-actions
+    commit-message:
+      prefix: "fix:"
     directories:
       - /
       - /actions/setup-rust
