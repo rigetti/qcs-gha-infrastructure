@@ -64,7 +64,7 @@ jobs:
           cache-key: test
       - name: Install cargo-nextest
         if: inputs.install-nextest
-        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2
+        uses: taiki-e/install-action@5bf6ce016fd2e72eefc647cbca1e4213f65955b8 # v2
         with:
           tool: cargo-nextest
       - run: ${{ inputs.test-command }}
