@@ -1,3 +1,9 @@
+## 0.4.6 (2026-09-28)
+
+### Fixes
+
+- bump taiki-e/install-action in the actions group across 1 directory (#15)
+
 ## 0.4.5 (2026-09-21)
 
 ### Fixes
