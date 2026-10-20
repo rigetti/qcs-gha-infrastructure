@@ -1,3 +1,9 @@
+## 0.4.8 (2026-10-20)
+
+### Fixes
+
+- bump the actions group across 1 directory with 3 updates (#17)
+
 ## 0.4.7 (2026-10-05)
 
 ### Fixes
