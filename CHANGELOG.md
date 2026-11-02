@@ -1,3 +1,9 @@
+## 0.4.10 (2026-11-02)
+
+### Fixes
+
+- bump taiki-e/install-action (#19)
+
 ## 0.4.9 (2026-10-26)
 
 ### Fixes
