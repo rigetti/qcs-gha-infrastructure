@@ -1,0 +1,325 @@
+name: release-plz
+
+# Reusable workflow: release a Rust project with release-plz (https://release-plz.dev)
+# using only the job's `GITHUB_TOKEN`.
+# This replaces the knope-based `prepare-release.yml` and `rust-cli-release.yml`.
+#
+# Callers wire it to `push` on the default branch (and optionally
+# `workflow_dispatch`). Every push runs the same pipeline:
+#
+#   release     `release-plz release`: tags and creates the GitHub release for
+#               any version in the tree that has no tag yet. That only happens
+#               when a human has merged a release PR.
+#   build       Only with `bin`: builds the binaries from the new tag.
+#   publish     Only with `bin`: uploads the binaries to the draft release,
+#               then publishes it.
+#   release-pr  `release-plz release-pr`: opens or updates the release PR for
+#               whatever is now unreleased.
+#
+# Nothing here relies on a workflow being triggered by a tag, a release, or a
+# push made with `GITHUB_TOKEN`: such events never start runs. The binaries are
+# built by this same run instead.
+#
+# Binaries and the draft release
+# ------------------------------
+# With `bin` set, the caller's `release-plz.toml` must set
+# `git_release_draft = true`. release-plz then creates the release as a draft,
+# which is invisible, and `publish` makes it public only after the assets are
+# attached. A release therefore never exists without the binaries that make it
+# installable. The workflow refuses to run `release` if the config does not
+# say so.
+# The tag does exist while the release is still a draft.
+#
+# If `build` or `publish` fails after `release` succeeded, re-run the failed
+# jobs of the same run: a new run finds the tag and releases nothing. Otherwise
+# upload the assets and run `gh release edit <tag> --draft=false` by hand.
+#
+# Caller requirements
+# -------------------
+# - The calling job must grant at least `contents: write` and
+#   `pull-requests: write`. Permissions declared here can only narrow what the
+#   caller grants, never widen it.
+# - Settings > Actions > General > "Allow GitHub Actions to create and approve
+#   pull requests" must be on, or `release-pr` cannot open the PR.
+# - Pull requests opened with `GITHUB_TOKEN` get no automatic `pull_request`
+#   runs; GitHub holds them in `action_required` until someone approves the
+#   run. Approved runs satisfy required checks.
+# - Merge the release PR with the default merge-commit strategy, or set
+#   `release_always = false`, as explained at
+#   https://release-plz.dev/docs/usage/release#what-commit-is-released
+#
+# Recommended `release-plz.toml` for a binary that is not on crates.io:
+#
+#   [workspace]
+#   git_only = true            # version state comes from tags, no cargo publish
+#   git_release_draft = true   # required with `bin`
+#   git_release_type = "auto"
+#
+# An optional `token` secret (a PAT or app token) is used instead of
+# `GITHUB_TOKEN` when supplied. That is the way to get CI running on the
+# release PR automatically; nothing here requires it.
+on:
+  workflow_call:
+    inputs:
+      bin:
+        description: >-
+          Name of the binary to build and attach to the release, as
+          `cargo build -p` expects it. Empty means the repository ships no
+          binaries: no build runs and release-plz publishes the release itself.
+        type: string
+        required: false
+        default: ""
+      package:
+        description: >-
+          Cargo package whose release gets the binaries. Defaults to `bin`.
+          Only one package per repository can ship assets this way, and other
+          released packages must not be drafts.
+        type: string
+        required: false
+        default: ""
+      matrix:
+        description: Platform matrix; see rust-cli-build.yml for the default.
+        type: string
+        required: false
+        default: ""
+      toolchain:
+        type: string
+        required: false
+        default: stable
+      artifact-path:
+        description: Directory the build artifacts are gathered into before upload.
+        type: string
+        required: false
+        default: release
+      config:
+        description: >-
+          Path to the release-plz config file. Empty means release-plz's own
+          search: `release-plz.toml`, `.release-plz.toml`,
+          `.config/release-plz.toml`.
+        type: string
+        required: false
+        default: ""
+      manifest-path:
+        description: Path to the Cargo.toml to release. Empty means the root.
+        type: string
+        required: false
+        default: ""
+      release-plz-version:
+        description: Version of the release-plz binary to install.
+        type: string
+        required: false
+        default: "0.4.3"
+    secrets:
+      token:
+        description: >-
+          Optional PAT or app token, used instead of `GITHUB_TOKEN`. The only
+          reason to pass one is to have the release PR and the tag trigger
+          other workflows.
+        required: false
+      cargo-registry-token:
+        description: Token for `cargo publish`, only if the config publishes to a registry.
+        required: false
+
+# One run at a time per branch, and never cancel: an interrupted release is the
+# one case this must not allow. A newer push replaces a queued (not a running)
+# run, which is safe because `release` acts on the version in the tree.
+concurrency:
+  group: release-plz-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      releases: ${{ steps.release-plz.outputs.releases }}
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      # The release must come from the default branch, never from a feature
+      # branch that someone dispatched by hand.
+      - name: Refuse anything but the default branch
+        env:
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT}" != "push" && "${EVENT}" != "workflow_dispatch" ]]; then
+            echo "::error::release-plz.yml handles push and workflow_dispatch only; got ${EVENT}."
+            exit 1
+          fi
+          if [[ "${REF}" != "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            echo "::error::Releases come from ${DEFAULT_BRANCH}; this run is on ${REF}. For a release candidate use release-plz-prerelease.yml."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # release-plz compares against tags and walks history.
+          fetch-depth: 0
+          # release-plz pushes through the API, so the credentials need not stay.
+          persist-credentials: false
+
+      # Binaries are attached after the release exists, so the release must be
+      # created as a draft. Checked before anything is released: afterwards it
+      # would be too late to hide a release that is already public.
+      - name: Require draft releases when binaries are attached
+        if: inputs.bin != ''
+        env:
+          CONFIG: ${{ inputs.config }}
+          PACKAGE: ${{ inputs.package || inputs.bin }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, sys, tomllib
+
+          candidates = [os.environ["CONFIG"]] if os.environ["CONFIG"] else [
+              "release-plz.toml", ".release-plz.toml", ".config/release-plz.toml"]
+          path = next((p for p in candidates if pathlib.Path(p).is_file()), None)
+          if path is None:
+              print("::error::No release-plz config found. With `bin` set it must set git_release_draft = true.")
+              sys.exit(1)
+          with open(path, "rb") as f:
+              config = tomllib.load(f)
+
+          package = os.environ["PACKAGE"]
+          draft = config.get("workspace", {}).get("git_release_draft", False)
+          for entry in config.get("package", []):
+              if entry.get("name") == package and "git_release_draft" in entry:
+                  draft = entry["git_release_draft"]
+          if draft is not True:
+              print(f"::error::{path}: git_release_draft must be true for package '{package}', "
+                    "so the release stays hidden until its binaries are attached.")
+              sys.exit(1)
+          print(f"{path}: git_release_draft is true for '{package}'")
+          PY
+
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.4.10
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          cache: "false"
+
+      - name: Run release-plz release
+        id: release-plz
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
+        with:
+          command: release
+          version: ${{ inputs.release-plz-version }}
+          config: ${{ inputs.config }}
+          manifest_path: ${{ inputs.manifest-path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.token || github.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.cargo-registry-token }}
+
+      # The tag of the package that ships binaries, or empty if it was not
+      # released by this run.
+      - name: Pick the tag to attach binaries to
+        id: pick
+        if: inputs.bin != ''
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+          PACKAGE: ${{ inputs.package || inputs.bin }}
+        run: |
+          set -euo pipefail
+          tag="$(jq -r --arg p "${PACKAGE}" '[.[] | select(.package_name == $p)][0].tag // ""' <<<"${RELEASES:-[]}")"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          if [[ -n "${tag}" ]]; then
+            echo "Released ${tag}; binaries follow."
+          else
+            echo "Nothing to release for ${PACKAGE}."
+          fi
+
+  build:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    # The tag, not the pushed commit: the binaries are built from exactly what
+    # was tagged.
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.4.10
+    with:
+      bin: ${{ inputs.bin }}
+      matrix: ${{ inputs.matrix }}
+      toolchain: ${{ inputs.toolchain }}
+      ref: refs/tags/${{ needs.release.outputs.tag }}
+
+  publish:
+    name: publish
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ inputs.artifact-path }}
+          merge-multiple: true
+
+      # Upload, check, then publish: the draft turns public only once every
+      # expected binary is attached.
+      - name: Attach the binaries and publish the release
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release.outputs.tag }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          BIN: ${{ inputs.bin }}
+        run: |
+          set -euo pipefail
+          ls -l "${ARTIFACT_PATH}"
+          if ! compgen -G "${ARTIFACT_PATH}/${BIN}-*" >/dev/null; then
+            echo "::error::No ${BIN}-* binaries in ${ARTIFACT_PATH}; leaving ${TAG} as a draft."
+            exit 1
+          fi
+
+          is_draft="$(gh release view "${TAG}" --repo "${REPO}" --json isDraft -q .isDraft)"
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "::error::Release ${TAG} is already public; git_release_draft was not honored."
+            exit 1
+          fi
+
+          gh release upload "${TAG}" "${ARTIFACT_PATH}"/* --repo "${REPO}" --clobber
+
+          count="$(gh release view "${TAG}" --repo "${REPO}" --json assets -q '[.assets[].name | select(startswith(env.BIN + "-"))] | length')"
+          expected="$(find "${ARTIFACT_PATH}" -type f | wc -l | tr -d ' ')"
+          if [[ "${count}" -lt "${expected}" ]]; then
+            echo "::error::${TAG} has ${count} binaries attached, expected ${expected}; leaving it as a draft."
+            exit 1
+          fi
+
+          gh release edit "${TAG}" --repo "${REPO}" --draft=false
+          echo "Published ${TAG} with ${count} binaries."
+
+  release-pr:
+    name: release-pr
+    # After `release`, so the tag of a just-merged release PR exists and no
+    # second PR is opened for that version. Not after `build`: opening the next
+    # PR does not need the binaries.
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.4.10
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          cache: "false"
+
+      - name: Run release-plz release-pr
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5.148
+        with:
+          command: release-pr
+          version: ${{ inputs.release-plz-version }}
+          config: ${{ inputs.config }}
+          manifest_path: ${{ inputs.manifest-path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.token || github.token }}

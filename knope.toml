@@ -13,6 +13,8 @@ versioned_files = [
     { path = ".github/workflows/prepare-prerelease.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
     { path = ".github/workflows/prepare-release.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
     { path = ".github/workflows/rust-ci.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/release-plz.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
+    { path = ".github/workflows/release-plz-prerelease.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
     { path = ".github/workflows/rust-cli-build.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
     { path = ".github/workflows/rust-cli-prerelease.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
     { path = ".github/workflows/rust-cli-release.yml", regex = 'qcs-gha-infrastructure/[^@]+@v(?<version>\d+\.\d+\.\d+.*)' },
