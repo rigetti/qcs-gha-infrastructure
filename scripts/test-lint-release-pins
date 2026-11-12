@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Offline tests for lint-release-pins: passing and failing fixtures.
+#
+#   scripts/test-lint-release-pins
+
+set -euo pipefail
+
+lint="$(cd "$(dirname "$0")" && pwd)/lint-release-pins"
+tmp="$(mktemp -d)"
+trap 'rm -rf "${tmp}"' EXIT
+failures=0
+
+pat='org/repo/[^@]*@v'
+
+# new_case NAME: a fresh repo-like directory with a config and a manifest.
+new_case() {
+    case_dir="${tmp}/$1"
+    mkdir -p "${case_dir}/.github/workflows"
+    cat >"${case_dir}/config.json" <<'JSON'
+{"packages": {".": {"extra-files": [
+  {"type": "generic", "path": "README.md"},
+  {"type": "generic", "path": ".github/workflows/*.yml", "glob": true},
+  {"type": "json", "path": "package.json", "jsonpath": "$.version"}
+]}}}
+JSON
+    echo '{".": "1.2.3"}' >"${case_dir}/manifest.json"
+    echo '# readme, no pins' >"${case_dir}/README.md"
+    echo '{"version": "1.2.3"}' >"${case_dir}/package.json"
+}
+
+# run_case NAME WANT_STATUS WANT_OUTPUT_REGEX [extra lint args...]
+run_case() {
+    local name="$1" want="$2" regex="$3" out status=0
+    shift 3
+    out="$(cd "${tmp}/${name}" && "${lint}" -c config.json -p "${pat}" "$@" 2>&1)" || status=$?
+    if [[ "${status}" -ne "${want}" ]]; then
+        echo "FAIL ${name}: exit ${status}, wanted ${want}"
+        echo "    ${out//$'\n'/$'\n'    }"
+        failures=$((failures + 1))
+    elif ! grep -Eq -e "${regex}" <<<"${out}"; then
+        echo "FAIL ${name}: output does not match /${regex}/"
+        echo "    ${out//$'\n'/$'\n'    }"
+        failures=$((failures + 1))
+    else
+        echo "ok   ${name}"
+    fi
+}
+
+new_case pass-inline
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+jobs:
+  a:
+    uses: org/repo/.github/workflows/x.yml@v1.2.3 # x-release-please-version
+YML
+run_case pass-inline 0 'lint-release-pins: ok' -m "manifest.json"
+
+new_case pass-block
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  # x-release-please-start-version
+  - uses: org/repo/actions/y@v1.2.3
+  # x-release-please-end
+  - uses: other/thing@v9.9.9
+YML
+run_case pass-block 0 'checked 1 annotated' -m "manifest.json"
+
+new_case fail-unannotated
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  - uses: org/repo/actions/y@v1.2.3 # x-release-please-version
+  - uses: org/repo/actions/z@v1.2.3
+YML
+run_case fail-unannotated 1 'a.yml:3: pin is not annotated' -m "manifest.json"
+
+new_case fail-manifest-disagrees
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  - uses: org/repo/actions/y@v1.2.2 # x-release-please-version
+YML
+run_case fail-manifest-disagrees 1 'pin is 1.2.2, expected 1.2.3' -m "manifest.json"
+
+new_case fail-pins-disagree-without-manifest
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  - uses: org/repo/actions/y@v1.2.3 # x-release-please-version
+  - uses: org/repo/actions/z@v1.2.4 # x-release-please-version
+YML
+run_case fail-pins-disagree-without-manifest 1 'pin is 1.2.4, expected 1.2.3'
+
+new_case fail-first-semver-wins
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  - run: tool 9.9.9 --with org/repo/actions/y@v1.2.3 # x-release-please-version
+YML
+# release-please would overwrite 9.9.9 and leave the pin alone.
+run_case fail-first-semver-wins 1 'pin is 9.9.9, expected 1.2.3' -m "manifest.json"
+
+new_case fail-not-an-extra-file
+mkdir -p "${case_dir}/actions"
+echo 'uses: org/repo/actions/y@v1.2.3 # x-release-please-version' >"${case_dir}/actions/action.yml"
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  - uses: org/repo/actions/y@v1.2.3 # x-release-please-version
+YML
+run_case fail-not-an-extra-file 1 'actions/action.yml: has a pin .* not a generic extra-file' -m "manifest.json"
+
+new_case fail-unclosed-block
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  # x-release-please-start-version
+  - uses: org/repo/actions/y@v1.2.3
+YML
+run_case fail-unclosed-block 1 'block is never closed' -m "manifest.json"
+
+new_case fail-marker-in-prose
+echo 'Annotate lines with x-release-please-version to opt in.' >"${case_dir}/README.md"
+cat >"${case_dir}/.github/workflows/a.yml" <<'YML'
+steps:
+  - uses: org/repo/actions/y@v1.2.3 # x-release-please-version
+YML
+run_case fail-marker-in-prose 1 'README.md:1: marker for a version but no semver' -m "manifest.json"
+
+new_case fail-nothing-annotated
+echo 'name: nothing' >"${case_dir}/.github/workflows/a.yml"
+run_case fail-nothing-annotated 1 'no annotated version found' -m "manifest.json"
+
+new_case exit-2-without-pattern
+status=0
+(cd "${case_dir}" && "${lint}" -c config.json >/dev/null 2>&1) || status=$?
+if [[ "${status}" -eq 2 ]]; then echo "ok   exit-2-without-pattern"; else echo "FAIL exit-2-without-pattern: ${status}"; failures=$((failures + 1)); fi
+
+if [[ "${failures}" -ne 0 ]]; then
+    echo "${failures} failure(s)"
+    exit 1
+fi
+echo "all passed"

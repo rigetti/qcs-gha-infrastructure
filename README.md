@@ -1,6 +1,6 @@
 # qcs-gha-infrastructure
 
-[![Latest release](https://img.shields.io/github/v/release/rigetti/qcs-gha-infrastructure)](https://github.com/rigetti/qcs-gha-infrastructure/releases/tag/v0.4.10)
+[![Latest release](https://img.shields.io/github/v/release/rigetti/qcs-gha-infrastructure)](https://github.com/rigetti/qcs-gha-infrastructure/releases/tag/v0.4.10) <!-- x-release-please-version -->
 
 Shared reusable workflows for QCS repositories.
 
@@ -340,6 +340,58 @@ its own.
 A changelog that does not exist on the default branch is deleted rather than
 restored: it is new in this branch, so its correct prior state is absent.
 
+## release-please (prototype)
+
+An alternative to the knope and `release-plz` flows for projects that are not Rust-only, or that must keep several files in step with the release version.
+Prototype only: it sits beside the knope workflows, and nothing here changes how this repository or its consumers pinned to `@v0.4.x` release.
+The full guide, with caller workflows, is [docs/release-please.md](docs/release-please.md).
+
+**Choosing.**
+
+| | `release-plz` | `release-please` |
+|---|---|---|
+| Fits | Rust crates, one version | Any language, mixed repositories, custom version files |
+| Version files | `Cargo.toml`, `Cargo.lock` | Anything: annotated lines, JSON, YAML, TOML, XML paths |
+| Examples | a CLI crate | Helm charts, `package.json`, README badges, workflows that pin each other |
+| Cost | Least configuration | Config plus manifest, and annotations that must be linted |
+
+Use `release-plz` when the project is Rust-only and the defaults fit.
+Use `release-please` when a non-Rust file must carry the version, or when `release-plz` cannot be configured to do what the release needs.
+
+**Components.**
+All are `workflow_call`; releases are always started by hand with `workflow_dispatch`, and nothing runs on push.
+
+- `release-please-pr.yml`: open or update the release PR.
+- `release-please-draft.yml`: after merging that PR, create the release as a draft.
+  Outputs `state`, `tag`, `version`, `sha`.
+- `release-assets-build.yml`: optional, language-neutral builds from a matrix of commands.
+  A Rust CLI can use `rust-cli-build.yml`; any other job that uploads `release-*` artifacts works too.
+- `release-please-publish.yml`: attach the artifacts to the draft, then publish it, so a release is never visible without its assets.
+- `release-please-prerelease.yml`: experimental; tag a prerelease of unmerged work with the version files bumped.
+- `scripts/lint-release-pins`: fail when a pin lacks its annotation or disagrees with the manifest.
+  A script, not an action: this repository ships no composite actions (see [above](#why-there-are-no-composite-actions)).
+
+The workflows run the `release-please` CLI, pinned, rather than the `release-please-action`: the CLI has separate `release-pr` and `github-release` commands and a `--draft` flag, which is what manual dispatch and draft-first releases need.
+
+**Annotating files.**
+release-please rewrites a version only on a line carrying an annotation comment, either inline or inside a start and end block, and it rewrites the first semver on that line.
+It skips every other line without a word, which is what the lint is for.
+The marker syntax, the other updater types (`json`, `yaml`, `toml`, `xml`, `pom`), the `release-type` options, and the conventional-commit mapping are in [docs/release-please.md](docs/release-please.md).
+This README is itself one of the files release-please would rewrite, so it does not spell the markers out; see the line below the title for a live one.
+
+**Token caveats.**
+The default is `GITHUB_TOKEN`, with an optional `token` secret taking precedence.
+
+- Turn on *Allow GitHub Actions to create and approve pull requests* in the repository settings.
+- Callers must grant `contents`, `pull-requests`, and `issues` write; a called workflow can only narrow permissions.
+- A PR created with `GITHUB_TOKEN` has its `pull_request` runs held in `action_required`; approve them.
+- Checks go stale after a later push to the release PR; close and reopen it.
+- `GITHUB_TOKEN` cannot update files under `.github/workflows`, so a config that lists workflow files needs a token with the `workflows` permission.
+  This repository's own config lists only the README badge, so it does not.
+
+**Try it** on a throwaway repository: see the last section of [docs/release-please.md](docs/release-please.md).
+This repository's own prototype config is `.github/release-please/config.json`, with its manifest beside it.
+
 ## Releasing
 
 knope, driven by this repository's own `prepare-release.yml` — the same workflow
@@ -378,6 +430,11 @@ fails here rather than in a consumer's pipeline.
 - **scripts**: `scripts/test-apply-ruleset`, which covers argument handling
   offline. Runnable locally, including under the bash macOS ships:
   `/bin/bash scripts/test-apply-ruleset`.
+  Also `scripts/test-lint-release-pins`,
+  passing and failing fixtures for the release-please pin lint.
+- **release-please-bump**: `scripts/test-release-please-bump`,
+  which runs the prerelease workflow's bump step over this repository's real
+  files with release-please's own updaters.
 - **setup-rust**: runs the inlined setup-rust steps
   with components and an extra target on
   Linux, macOS, and Windows, then checks `cargo`, `clippy`, `rustfmt`, the target

@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# Lint the version pins that release-please's generic updater maintains.
+#
+# release-please rewrites a line only when it carries an annotation (inline,
+# or inside a start/end block), and it rewrites the FIRST semver on that line.
+# It never complains about a line it skipped, so a pin that lost (or never had)
+# its annotation silently stays on the old version forever.
+# This script fails instead.
+#
+#   lint-release-pins --config release-please-config.json \
+#                     --manifest .release-please-manifest.json \
+#                     --pattern 'my-org/my-repo/[^@]*@v'
+#
+# It checks that:
+#   1. every line matching --pattern, in the --scan paths, is annotated;
+#   2. every file in --scan holding such a line is a generic extra-file in the
+#      config (otherwise release-please never opens it);
+#   3. every version release-please would rewrite equals the manifest version
+#      (or, without --manifest, all of them agree with each other);
+#   4. markers are well formed: no block left open, no marker without a semver
+#      to rewrite (a marker quoted in prose is how one gets there).
+#
+# Only generic extra-files are read: the json, yaml, toml, and xml updaters
+# address a path instead and take no annotations.
+#
+# Options:
+#   -c, --config FILE      release-please config (default: release-please-config.json)
+#   -m, --manifest FILE    manifest; enables the comparison to its version
+#   -k, --package PATH     package key in config and manifest (default: ".")
+#   -p, --pattern ERE      lines that count as pins (required unless --no-scan)
+#   -s, --scan PATH        file or directory searched for pins; repeatable
+#                          (default: .github/workflows actions)
+#       --no-scan          only check the version consistency of annotated lines
+#   -h, --help
+#
+# Exit status: 0 clean, 1 findings, 2 usage or environment error.
+
+set -euo pipefail
+
+config="release-please-config.json"
+manifest=""
+package="."
+pattern=""
+scan=()
+no_scan=0
+
+usage() { sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p;}' "$0"; }
+
+die() { echo "lint-release-pins: $*" >&2; exit 2; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c | --config) config="${2:?missing value for $1}"; shift 2 ;;
+        -m | --manifest) manifest="${2:?missing value for $1}"; shift 2 ;;
+        -k | --package) package="${2:?missing value for $1}"; shift 2 ;;
+        -p | --pattern) pattern="${2:?missing value for $1}"; shift 2 ;;
+        -s | --scan) scan+=("${2:?missing value for $1}"); shift 2 ;;
+        --no-scan) no_scan=1; shift ;;
+        -h | --help) usage; exit 0 ;;
+        *) die "unknown argument: $1" ;;
+    esac
+done
+
+command -v jq >/dev/null || die "jq is required"
+[[ -f "${config}" ]] || die "config not found: ${config}"
+if [[ "${no_scan}" -eq 0 && -z "${pattern}" ]]; then
+    die "--pattern is required (or pass --no-scan)"
+fi
+if [[ "${#scan[@]}" -eq 0 ]]; then
+    scan=(.github/workflows actions)
+fi
+
+findings=0
+fail() { echo "::error::$*"; findings=$((findings + 1)); }
+
+# Expected version, from the manifest.
+expected=""
+if [[ -n "${manifest}" ]]; then
+    [[ -f "${manifest}" ]] || die "manifest not found: ${manifest}"
+    expected="$(jq -r --arg k "${package}" '.[$k] // empty' "${manifest}")"
+    [[ -n "${expected}" ]] || die "manifest has no version for package '${package}'"
+fi
+
+# Generic extra-files, from the config. Entries are a bare path (which
+# release-please treats as generic, plus a path-based updater for json, yaml,
+# toml, and xml) or an object.
+extra=()
+while IFS=$'\t' read -r path glob; do
+    path="${path#/}"
+    if [[ "${glob}" == "true" ]]; then
+        matched=0
+        # `**` needs bash 4's globstar; `*` works everywhere.
+        shopt -s nullglob 2>/dev/null || true
+        shopt -s globstar 2>/dev/null || true
+        for f in ${path}; do
+            [[ -f "${f}" ]] && { extra+=("${f}"); matched=1; }
+        done
+        [[ "${matched}" -eq 1 ]] || echo "warning: glob matched no files: ${path}" >&2
+    else
+        [[ -f "${path}" ]] || { fail "extra-file does not exist: ${path}"; continue; }
+        extra+=("${path}")
+    fi
+done < <(jq -r --arg k "${package}" '
+    (.packages[$k]["extra-files"] // .["extra-files"] // [])[]
+    | if type == "string" then [., "false"]
+      elif (.type // "generic") == "generic" then [.path, ((.glob // false) | tostring)]
+      else empty end
+    | @tsv' "${config}")
+
+# Files to search for pins that must be annotated.
+scanned=()
+if [[ "${no_scan}" -eq 0 ]]; then
+    for s in "${scan[@]}"; do
+        [[ -e "${s}" ]] || continue
+        while IFS= read -r f; do
+            scanned+=("${f}")
+        done < <(grep -rlE -e "${pattern}" "${s}" 2>/dev/null | sort || true)
+    done
+fi
+
+in_list() {
+    local needle="$1"; shift
+    local x
+    for x in "$@"; do [[ "${x#./}" == "${needle#./}" ]] && return 0; done
+    return 1
+}
+
+# 2. Scanned files must be known to release-please.
+if [[ "${#scanned[@]}" -gt 0 ]]; then
+    for f in "${scanned[@]}"; do
+        if [[ "${#extra[@]}" -eq 0 ]] || ! in_list "${f}" "${extra[@]}"; then
+            fail "${f}: has a pin matching '${pattern}' but is not a generic extra-file in ${config}"
+        fi
+    done
+fi
+
+# Union of files to read: every extra-file, plus scanned files.
+all=()
+if [[ "${#extra[@]}" -gt 0 ]]; then all+=("${extra[@]}"); fi
+if [[ "${#scanned[@]}" -gt 0 ]]; then
+    for f in "${scanned[@]}"; do
+        if [[ "${#all[@]}" -eq 0 ]] || ! in_list "${f}" "${all[@]}"; then all+=("${f}"); fi
+    done
+fi
+
+# Mirror release-please's generic updater (src/updaters/generic.ts): an inline
+# marker acts on its own line, a start marker opens a block that runs through
+# the line holding the end marker, and the first semver on an acted-on line is
+# what gets rewritten.
+# Output, one line each:
+#   VERSION <file>:<line> <semver>
+#   ERROR   <message>
+scan_file() {
+    local file="$1" check_pins="$2"
+    PIN_PATTERN="${pattern}" awk -v file="${file}" -v check_pins="${check_pins}" '
+        BEGIN {
+            pin = ENVIRON["PIN_PATTERN"]
+            semver = "[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9_.]+)?(\\+[-A-Za-z0-9_.]+)?"
+            inline_re = "x-release-please-(major|minor|patch|version-date|version|date)"
+            start_re = "x-release-please-start-(major|minor|patch|version-date|version|date)"
+            block = ""; start_line = 0
+        }
+        function scope_of(s, re,   m) {
+            match(s, re); m = substr(s, RSTART, RLENGTH)
+            sub(/^x-release-please-(start-)?/, "", m)
+            return m
+        }
+        function act(scope) {
+            if (scope != "version" && scope != "version-date") { return }
+            if (match($0, semver)) {
+                printf "VERSION %s:%d %s\n", file, NR, substr($0, RSTART, RLENGTH)
+            } else {
+                printf "ERROR %s:%d: marker for a version but no semver on the line\n", file, NR
+            }
+        }
+        {
+            annotated = 0
+            if ($0 ~ inline_re) {
+                annotated = 1; act(scope_of($0, inline_re))
+            } else if (block != "") {
+                annotated = 1
+                if ($0 ~ /x-release-please-end/) { ended = 1 }
+                if (block == "version" || block == "version-date") {
+                    # A block may legitimately hold lines without a version.
+                    if (match($0, semver)) {
+                        printf "VERSION %s:%d %s\n", file, NR, substr($0, RSTART, RLENGTH)
+                        seen = 1
+                    }
+                }
+                if (ended) {
+                    if ((block == "version" || block == "version-date") && !seen) {
+                        printf "ERROR %s:%d: block opened here holds no semver\n", file, start_line
+                    }
+                    block = ""; ended = 0
+                }
+            } else if ($0 ~ start_re) {
+                block = scope_of($0, start_re); start_line = NR; seen = 0
+            }
+            if (check_pins == "1" && !annotated && pin != "" && $0 ~ pin) {
+                printf "ERROR %s:%d: pin is not annotated, release-please will skip it: %s\n", file, NR, $0
+            }
+        }
+        END {
+            if (block != "") {
+                printf "ERROR %s:%d: block is never closed\n", file, start_line
+            }
+        }
+    ' "${file}"
+}
+
+versions_file="$(mktemp)"
+trap 'rm -f "${versions_file}"' EXIT
+
+if [[ "${#all[@]}" -gt 0 ]]; then
+    for f in "${all[@]}"; do
+        check=0
+        if [[ "${#scanned[@]}" -gt 0 ]] && in_list "${f}" "${scanned[@]}"; then check=1; fi
+        # A scanned file is checked for unannotated pins; a README-style
+        # extra-file with prose examples is not.
+        while IFS= read -r line; do
+            case "${line}" in
+                "ERROR "*) fail "${line#ERROR }" ;;
+                "VERSION "*) echo "${line#VERSION }" >>"${versions_file}" ;;
+            esac
+        done < <(scan_file "${f}" "${check}")
+    done
+fi
+
+# 3. Versions.
+if [[ -s "${versions_file}" ]]; then
+    if [[ -z "${expected}" ]]; then
+        expected="$(head -n1 "${versions_file}" | cut -d' ' -f2)"
+        echo "note: no manifest given; comparing to the first pin, ${expected}"
+    fi
+    while read -r where ver; do
+        if [[ "${ver}" != "${expected}" ]]; then
+            fail "${where}: pin is ${ver}, expected ${expected}"
+        fi
+    done <"${versions_file}"
+    echo "checked $(wc -l <"${versions_file}" | tr -d ' ') annotated version(s) in ${#all[@]} file(s)"
+else
+    fail "no annotated version found in any generic extra-file; release-please would update nothing"
+fi
+
+# release-please writes the release PR through the API. GITHUB_TOKEN may not
+# create or update files under .github/workflows (the `workflows` permission
+# cannot be granted to it), so such an extra-file needs a different token.
+if [[ "${#extra[@]}" -gt 0 ]]; then
+    for f in "${extra[@]}"; do
+        if [[ "${f#./}" == .github/workflows/* ]]; then
+            echo "note: ${f} is under .github/workflows; GITHUB_TOKEN cannot update workflow files, so opening the release PR needs a token with the 'workflows' permission"
+            break
+        fi
+    done
+fi
+
+if [[ "${findings}" -ne 0 ]]; then
+    echo "lint-release-pins: ${findings} finding(s)" >&2
+    exit 1
+fi
+echo "lint-release-pins: ok"

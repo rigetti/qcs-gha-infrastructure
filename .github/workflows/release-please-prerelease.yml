@@ -1,0 +1,330 @@
+name: release-please prerelease
+
+# Reusable workflow (experimental): tag a prerelease of work that is not on the
+# default branch, so a consumer can use it before the release PR lands.
+#
+# Prototype, alongside (not replacing) the knope workflows. See the README
+# section "release-please" and `agent-choices.md` for the design and the open
+# risk below.
+#
+# release-please itself only versions what merged. This flow reuses its
+# updater code to do the part that matters for a prerelease: the version files
+# (changelog excluded) must carry the prerelease version, so the binary that
+# gets built reports the same version as its tag.
+#
+#   1. checkout the dispatched ref;
+#   2. compute the next `<version>-rc.N` from the tags that exist;
+#   3. apply the config's extra-files to that version in a LOCAL commit
+#      (never pushed to a branch);
+#   4. push only the tag, which carries that commit;
+#   5. create a DRAFT prerelease for the tag.
+# The caller then builds from the `sha` output and calls
+# release-please-publish.yml, which attaches the assets and publishes.
+#
+# Open risk: GITHUB_TOKEN cannot push a commit that changes
+# `.github/workflows/**` (it lacks the `workflows` permission), and a tag
+# pushed for a commit like that is a push. A config that lists workflow files
+# as extra-files therefore needs a token with that permission (the optional
+# `token` secret), or this step is rejected by GitHub. This could not be tried
+# here; see agent-choices.md.
+#
+# The caller needs:
+#
+#   permissions:
+#     contents: write
+#
+# Safe to re-run: pass the `rc` of the failed run to continue it. The tag is
+# not pushed twice, and the draft is created only if missing.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The release this prerelease leads up to, `X.Y.Z`.
+        type: string
+        required: true
+      rc-label:
+        description: Prerelease identifier; the tag is `<prefix><version>-<label>.<N>`.
+        type: string
+        required: false
+        default: rc
+      rc:
+        description: >-
+          Use this prerelease number instead of the next free one. For
+          continuing a run that stopped halfway.
+        type: string
+        required: false
+        default: ""
+      config-file:
+        description: Path to the release-please config in the repository.
+        type: string
+        required: false
+        default: release-please-config.json
+      package:
+        description: Package key in the config whose extra-files are updated.
+        type: string
+        required: false
+        default: "."
+      tag-prefix:
+        type: string
+        required: false
+        default: v
+      release-please-version:
+        description: Version of the release-please npm package to run.
+        type: string
+        required: false
+        default: "17.11.2"
+    secrets:
+      token:
+        description: >-
+          Token used to push the tag and create the draft. Needs the
+          `workflows` permission if the config lists workflow files.
+        required: false
+    outputs:
+      tag:
+        description: The prerelease tag.
+        value: ${{ jobs.prepare.outputs.tag }}
+      version:
+        description: The prerelease version, without the prefix.
+        value: ${{ jobs.prepare.outputs.version }}
+      sha:
+        description: Commit the tag points at. Build from this.
+        value: ${{ jobs.prepare.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      sha: ${{ steps.tag.outputs.sha }}
+    env:
+      GH_TOKEN: ${{ secrets.token || github.token }}
+    steps:
+      - name: Validate context and inputs
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          VERSION: ${{ inputs.version }}
+          RC_LABEL: ${{ inputs.rc-label }}
+          RC: ${{ inputs.rc }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          PACKAGE: ${{ inputs.package }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          RP_VERSION: ${{ inputs.release-please-version }}
+        run: |
+          set -euo pipefail
+          # A tag ref has nothing to build a prerelease on.
+          if [[ "${REF_TYPE}" != "branch" ]]; then
+            echo "::error::Dispatch on a branch, not a ${REF_TYPE}."
+            exit 1
+          fi
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z, got '${VERSION}'."
+            exit 1
+          fi
+          if [[ ! "${RC_LABEL}" =~ ^[a-z]+$ ]]; then
+            echo "::error::rc-label must be lowercase letters, got '${RC_LABEL}'."
+            exit 1
+          fi
+          if [[ -n "${RC}" && ! "${RC}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::rc must be a positive integer, got '${RC}'."
+            exit 1
+          fi
+          if [[ ! "${CONFIG_FILE}" =~ ^[A-Za-z0-9._/-]+$ || "${CONFIG_FILE}" == *..* ]]; then
+            echo "::error::Invalid path '${CONFIG_FILE}'."
+            exit 1
+          fi
+          if [[ ! "${PACKAGE}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid package '${PACKAGE}'."
+            exit 1
+          fi
+          if [[ ! "${TAG_PREFIX}" =~ ^[A-Za-z0-9._-]*$ ]]; then
+            echo "::error::Invalid tag-prefix '${TAG_PREFIX}'."
+            exit 1
+          fi
+          if [[ ! "${RP_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release-please-version must be X.Y.Z, got '${RP_VERSION}'."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # The tag is pushed with this token.
+          token: ${{ secrets.token || github.token }}
+
+      - name: Plan the prerelease number
+        id: plan
+        env:
+          VERSION: ${{ inputs.version }}
+          RC_LABEL: ${{ inputs.rc-label }}
+          RC: ${{ inputs.rc }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          base="${TAG_PREFIX}${VERSION}-${RC_LABEL}"
+          if [[ -n "${RC}" ]]; then
+            n="${RC}"
+          else
+            # Highest existing number, plus one. The remote's view, not the
+            # clone's: a tag pushed a minute ago still counts.
+            last="$(git ls-remote --tags --refs origin "refs/tags/${base}.*" \
+              | sed -E 's|.*refs/tags/.*\.([0-9]+)$|\1|' | sort -n | tail -n1)"
+            n=$(( ${last:-0} + 1 ))
+          fi
+          {
+            echo "tag=${base}.${n}"
+            echo "version=${VERSION}-${RC_LABEL}.${n}"
+          } >>"${GITHUB_OUTPUT}"
+          echo "Planned ${base}.${n}"
+
+      - name: Does the tag already exist
+        id: exists
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags --refs origin "refs/tags/${TAG}" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+            echo "exists=true" >>"${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >>"${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.exists.outputs.exists == 'false'
+        with:
+          node-version: "22"
+
+      # Uses release-please's own updater classes, so the result is exactly what
+      # a release PR would write. Only extra-files: the changelog and manifest
+      # are not part of a prerelease.
+      - name: Bump the version files
+        id: bump
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          NEW_VERSION: ${{ steps.plan.outputs.version }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          PACKAGE: ${{ inputs.package }}
+          RP_VERSION: ${{ inputs.release-please-version }}
+        run: |
+          set -euo pipefail
+          rp_dir="${RUNNER_TEMP}/rp"
+          if [[ ! -d "${rp_dir}/node_modules/release-please" ]]; then
+            mkdir -p "${rp_dir}"
+            npm install --no-save --no-audit --no-fund --prefix "${rp_dir}" "release-please@${RP_VERSION}"
+          fi
+          cat >"${RUNNER_TEMP}/bump.cjs" <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const rp = path.join(process.env.RP_DIR, 'node_modules', 'release-please', 'build', 'src');
+          const load = (p) => require(path.join(rp, p));
+          const { Version } = load('version');
+          const { Generic } = load('updaters/generic');
+          const { GenericJson } = load('updaters/generic-json');
+          const { GenericYaml } = load('updaters/generic-yaml');
+          const { GenericToml } = load('updaters/generic-toml');
+          const { GenericXml } = load('updaters/generic-xml');
+          const { PomXml } = load('updaters/java/pom-xml');
+          const { CompositeUpdater } = load('updaters/composite');
+
+          const version = Version.parse(process.env.NEW_VERSION);
+          const config = JSON.parse(fs.readFileSync(process.env.CONFIG_FILE, 'utf8'));
+          const pkg = process.env.PACKAGE;
+          const entries = (config.packages?.[pkg]?.['extra-files'] ?? config['extra-files'] ?? []);
+          const base = pkg === '.' ? '' : pkg;
+          const resolve = (p) => p.startsWith('/') ? p.slice(1) : path.posix.join(base, p);
+
+          // The same choice release-please's strategy makes per entry.
+          const generic = () => new Generic({ version });
+          function updaterFor(entry) {
+            if (typeof entry === 'string') {
+              if (entry.endsWith('.json')) return new CompositeUpdater(new GenericJson('$.version', version), generic());
+              if (entry.endsWith('.yaml') || entry.endsWith('.yml')) return new CompositeUpdater(new GenericYaml('$.version', version), generic());
+              if (entry.endsWith('.toml')) return new CompositeUpdater(new GenericToml('$.version', version), generic());
+              if (entry.endsWith('.xml')) return new CompositeUpdater(new GenericXml('/*/version', version), generic());
+              return generic();
+            }
+            switch (entry.type) {
+              case 'generic': return generic();
+              case 'json': return new GenericJson(entry.jsonpath, version);
+              case 'yaml': return new GenericYaml(entry.jsonpath, version);
+              case 'toml': return new GenericToml(entry.jsonpath, version);
+              case 'xml': return new GenericXml(entry.xpath, version);
+              case 'pom': return new PomXml(version);
+              default: throw new Error(`unsupported extra-file type: ${entry.type}`);
+            }
+          }
+
+          let changed = 0;
+          for (const entry of entries) {
+            const p = typeof entry === 'string' ? entry : entry.path;
+            const files = (typeof entry === 'object' && entry.glob)
+              ? fs.globSync(resolve(p)).filter((f) => fs.statSync(f).isFile())
+              : [resolve(p)];
+            for (const file of files) {
+              if (!fs.existsSync(file)) {
+                throw new Error(`extra-file does not exist: ${file}`);
+              }
+              const before = fs.readFileSync(file, 'utf8');
+              const after = updaterFor(entry).updateContent(before);
+              if (after !== before) {
+                fs.writeFileSync(file, after);
+                changed += 1;
+                console.log(`updated ${file}`);
+              }
+            }
+          }
+          console.log(`${changed} file(s) updated to ${version}`);
+          JS
+          RP_DIR="${rp_dir}" node "${RUNNER_TEMP}/bump.cjs"
+
+      # The commit stays local; only the tag reaches the remote. The prerelease
+      # tag points at it, so a build from the tag has the right version, and no
+      # branch (the default branch included) ever carries it.
+      - name: Commit locally and push the tag
+        id: tag
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          NEW_VERSION: ${{ steps.plan.outputs.version }}
+          EXISTS: ${{ steps.exists.outputs.exists }}
+        run: |
+          set -euo pipefail
+          if [[ "${EXISTS}" == "false" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add --update
+            git commit --allow-empty --message "chore: prepare prerelease ${NEW_VERSION}"
+            git tag "${TAG}"
+            if ! git push origin "refs/tags/${TAG}"; then
+              echo "::error::Pushing ${TAG} failed. If the config lists files under .github/workflows, GITHUB_TOKEN cannot push them: pass a token with the 'workflows' permission."
+              exit 1
+            fi
+          else
+            echo "Tag ${TAG} already exists; reusing it."
+          fi
+          echo "sha=$(git rev-parse "refs/tags/${TAG}^{commit}")" >>"${GITHUB_OUTPUT}"
+
+      # A tag without a release is the state a failed earlier run leaves behind,
+      # so create the draft whenever it is missing, whether or not this run
+      # pushed the tag.
+      - name: Ensure the draft prerelease exists
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          release="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            | jq -c --arg t "${TAG}" '[.[] | select(.tag_name == $t)] | first // empty')"
+          if [[ -n "${release}" ]]; then
+            echo "Release for ${TAG} exists ($(jq -r 'if .draft then "draft" else "published" end' <<<"${release}"))."
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="${TAG}" -f name="${TAG}" -f target_commitish="${SHA}" \
+            -F draft=true -F prerelease=true -F generate_release_notes=true >/dev/null
+          echo "Created draft prerelease ${TAG}."

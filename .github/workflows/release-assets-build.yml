@@ -1,0 +1,85 @@
+name: Release assets build
+
+# Reusable workflow: a generic, language-neutral way to build release assets.
+# Each matrix entry runs one shell command on one runner, then uploads the files
+# it produced as an artifact named `release-<name>`, which
+# release-please-publish.yml picks up.
+#
+# A Rust CLI project can call rust-cli-build.yml instead; any other build can
+# either list its commands here or be a workflow of the caller's own that
+# uploads `release-*` artifacts.
+#
+# Commands see `RELEASE_VERSION` and `RELEASE_TAG` in the environment.
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: >-
+          JSON array of objects with `name` (artifact suffix), `runs-on`,
+          `run` (a bash command), and `path` (files to upload, relative to the
+          checkout). Example:
+          [{"name": "linux", "runs-on": "ubuntu-latest", "run": "make dist", "path": "dist/*"}]
+        type: string
+        required: true
+      ref:
+        description: >-
+          Commit to build. Pass the draft workflow's `sha` output: a draft
+          release has no tag to check out yet.
+        type: string
+        required: true
+      version:
+        description: Version being released; exposed as `RELEASE_VERSION`.
+        type: string
+        required: false
+        default: ""
+      tag:
+        description: Tag being released; exposed as `RELEASE_TAG`.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.matrix) }}
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Validate the matrix entry
+        shell: bash
+        env:
+          NAME: ${{ matrix.name }}
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Invalid name '${NAME}'."
+            exit 1
+          fi
+          if [[ ! "${REF}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full commit SHA, got '${REF}'."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Build
+        shell: bash
+        env:
+          COMMAND: ${{ matrix.run }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          bash -c "${COMMAND}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.name }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error

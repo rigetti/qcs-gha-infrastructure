@@ -77,6 +77,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: scripts/test-apply-ruleset
+      - run: scripts/test-lint-release-pins
+
+  # Runs the prerelease workflow's bump step, verbatim, over this repository's
+  # real files with release-please's own updaters.
+  release-please-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: scripts/test-release-please-bump
 
   # The setup-rust steps are what every Rust workflow here depends on, so check
   # that they produce a working toolchain with the components asked for.
@@ -237,7 +249,7 @@ jobs:
     if: always()
     # Only jobs in this workflow: `needs` cannot reach across workflows. The
     # release dry-run in release.yml reports its own check.
-    needs: [lint, scripts, setup-rust, reset-changelogs]
+    needs: [lint, scripts, release-please-bump, setup-rust, reset-changelogs]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results
