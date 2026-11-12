@@ -1,5 +1,11 @@
 name: Rust CLI release
 
+# DEPRECATED: use release-plz.yml (set `bin`) instead.
+# This knope-based workflow needs a PAT or app token to work at all: pushes made
+# with `GITHUB_TOKEN` start no workflow runs. It still works for callers pinned
+# to a tag and will be removed in a future breaking release.
+# See the README's "Migrating from knope to release-plz".
+
 # Reusable workflow: the second half of a split release for a repository that
 # ships binaries. Builds the CLI for every platform, then runs knope's Release
 # step over those artifacts.

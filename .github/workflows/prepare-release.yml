@@ -1,5 +1,11 @@
 name: Prepare release
 
+# DEPRECATED: use release-plz.yml instead.
+# This knope-based workflow needs a PAT or app token to work at all: pushes made
+# with `GITHUB_TOKEN` start no workflow runs. It still works for callers pinned
+# to a tag and will be removed in a future breaking release.
+# See the README's "Migrating from knope to release-plz".
+
 # Reusable workflow: the automatic half of a knope-driven release.
 #
 #   pull_request   dry run, so a PR shows what it would release

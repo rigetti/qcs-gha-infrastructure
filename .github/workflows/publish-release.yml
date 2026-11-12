@@ -1,5 +1,11 @@
 name: Publish release
 
+# DEPRECATED: use release-plz.yml (set `bin`); its publish job replaces this instead.
+# This knope-based workflow needs a PAT or app token to work at all: pushes made
+# with `GITHUB_TOKEN` start no workflow runs. It still works for callers pinned
+# to a tag and will be removed in a future breaking release.
+# See the README's "Migrating from knope to release-plz".
+
 # Reusable workflow: the second half of a split knope release. The caller's
 # `draft-release` workflow prepared and pushed the version bump; this runs
 # knope's `Release` step once the artifacts to attach exist.

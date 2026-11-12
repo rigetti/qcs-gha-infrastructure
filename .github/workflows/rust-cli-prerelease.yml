@@ -1,5 +1,11 @@
 name: Rust CLI prerelease
 
+# DEPRECATED: use release-plz-prerelease.yml instead.
+# This knope-based workflow still works for callers pinned to a tag, and now
+# also with `GITHUB_TOKEN` alone, but it will be removed in a future breaking
+# release.
+# See the README's "Migrating from knope to release-plz".
+
 # Reusable workflow: cut a release candidate from the branch it is dispatched
 # on — bump, build, publish — for a repository that ships binaries.
 #
@@ -57,7 +63,8 @@ on:
       token:
         description: >-
           Token used to push the prerelease commit and publish the release.
-        required: true
+          Optional: the stages fall back to the job's own token.
+        required: false
 
 jobs:
   draft:
