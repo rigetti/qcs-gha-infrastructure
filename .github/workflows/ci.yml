@@ -17,9 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # internal-pins compares against the latest tag.
-          fetch-depth: 0
       # actionlint parses every workflow, checks expression syntax and context
       # availability, and runs shellcheck over each `run:` block.
       # taiki-e/install-action does not carry actionlint, so use upstream's own
@@ -36,24 +33,36 @@ jobs:
       - run: ./actionlint -color
       - name: Shellcheck the scripts
         run: shellcheck scripts/*
-      # knope rewrites the internal action references at release time and
-      # refuses to release when they disagree, so the only gap left is a file
-      # carrying a pin that knope.toml does not declare.
-      - name: Every internal reference is declared in knope.toml
+      # A workflow here that references this repository by tag runs that
+      # tag's code, not the code next to it, and every release would have to
+      # rewrite the tag. Nested reusable workflows use `./.github/workflows/`,
+      # which resolves to the caller's own commit; steps are inlined, because
+      # a step-level local path resolves against the caller's repository.
+      - name: No workflow references this repository by tag
         run: |
           set -euo pipefail
-          missing=0
-          while IFS= read -r file; do
-            if ! grep -q "\"${file}\"" knope.toml; then
-              echo "${file} references this repository but is not in knope.toml"
-              missing=1
-            fi
-          done < <(grep -rl 'qcs-gha-infrastructure/[^@]*@v' .github/workflows actions | sort)
-          if [[ "${missing}" -ne 0 ]]; then
-            echo "::error::Add the file(s) above to versioned_files, or their pins will never be updated."
+          dirs=(.github)
+          if [[ -d actions ]]; then
+            dirs+=(actions)
+          fi
+          if grep -rniE "uses:[[:space:]]*[\"']?rigetti/qcs-gha-infrastructure/" "${dirs[@]}"; then
+            echo "::error::Use ./.github/workflows/<file>.yml for a nested reusable workflow, and inline steps rather than calling an action from this repository."
             exit 1
           fi
-          echo "All files referencing this repository are declared."
+          echo "No self-references found."
+      # The other half of the same trap: a step-level local action looks fine
+      # in this repository's CI and breaks every caller in another repository.
+      - name: No step uses a local action
+        run: |
+          set -euo pipefail
+          if grep -rnE "uses:[[:space:]]*[\"']?\./" .github \
+              | grep -vE "uses:[[:space:]]*[\"']?\./\.github/workflows/"; then
+            echo "::error::A local action resolves against the caller's checkout; inline its steps instead."
+            exit 1
+          fi
+          echo "No local actions found."
+      - name: Inlined step copies agree
+        run: scripts/check-inlined-steps
 
       - name: Rulesets are valid JSON with the keys the API needs
         run: |
@@ -69,23 +78,70 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: scripts/test-apply-ruleset
 
-  # setup-rust is the action every Rust workflow here depends on, so check that
-  # it produces a working toolchain with the components it was asked for.
+  # The setup-rust steps are what every Rust workflow here depends on, so check
+  # that they produce a working toolchain with the components asked for.
+  # scripts/check-inlined-steps makes sure this copy is the one they all carry.
   setup-rust:
     strategy:
       fail-fast: false
       matrix:
         runs-on: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.runs-on }}
+    env:
+      SETUP_RUST_TOOLCHAIN: stable
+      SETUP_RUST_COMPONENTS: clippy rustfmt
+      SETUP_RUST_TARGETS: x86_64-unknown-linux-musl
+      # Nothing to cache in this repository, and a cache entry per platform
+      # for an empty project is waste.
+      SETUP_RUST_CACHE: "false"
+      SETUP_RUST_CACHE_KEY: default
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./actions/setup-rust
+      # setup-rust, inlined: keep every copy identical (scripts/check-inlined-steps).
+      - name: Install Rust toolchain (setup-rust)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain none --profile minimal
+            echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+            export PATH="${HOME}/.cargo/bin:${PATH}"
+          fi
+          rustup toolchain install "${SETUP_RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${SETUP_RUST_TOOLCHAIN}"
+          # Both lists are space-separated, so word splitting is intended.
+          # shellcheck disable=SC2086
+          for component in ${SETUP_RUST_COMPONENTS}; do
+            rustup component add --toolchain "${SETUP_RUST_TOOLCHAIN}" "${component}"
+          done
+          # shellcheck disable=SC2086
+          for target in ${SETUP_RUST_TARGETS}; do
+            rustup target add --toolchain "${SETUP_RUST_TOOLCHAIN}" "${target}"
+          done
+          rustc --version
+          cargo --version
+      - name: Configure cargo for CI (setup-rust)
+        shell: bash
+        run: |
+          {
+            echo "CARGO_TERM_COLOR=always"
+            echo "CARGO_INCREMENTAL=0"
+            echo "RUSTUP_TOOLCHAIN=${SETUP_RUST_TOOLCHAIN}"
+          } >> "${GITHUB_ENV}"
+      - name: Cache cargo registry (setup-rust)
+        if: env.SETUP_RUST_CACHE == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          components: clippy rustfmt
-          targets: x86_64-unknown-linux-musl
-          # Nothing to cache in this repository, and a cache entry per platform
-          # for an empty project is waste.
-          cache: "false"
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-${{ env.SETUP_RUST_CACHE_KEY }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-${{ env.SETUP_RUST_CACHE_KEY }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-
       - name: The toolchain and its components are usable
         shell: bash
         run: |
@@ -96,9 +152,10 @@ jobs:
           cargo fmt --version
           rustup target list --installed | grep x86_64-unknown-linux-musl
           # setup-rust sets these for every consumer; a change that drops them
-          # would silently disable sccache and slow every cached build.
+          # would go unnoticed otherwise.
           [[ "${CARGO_TERM_COLOR}" == "always" ]]
           [[ "${CARGO_INCREMENTAL}" == "0" ]]
+          [[ "${RUSTUP_TOOLCHAIN}" == "${SETUP_RUST_TOOLCHAIN}" ]]
 
   reset-changelogs:
     runs-on: ubuntu-latest
@@ -106,6 +163,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      # Test the script the prepare workflows actually run, rather than a
+      # copy of it. scripts/check-inlined-steps keeps their two copies equal.
+      - name: Extract the "Reset changelogs" script
+        run: |
+          set -euo pipefail
+          yq '.jobs[].steps[] | select(.name == "Reset changelogs") | .run' \
+            .github/workflows/prepare-release.yml > "${RUNNER_TEMP}/reset-changelogs"
+          [[ -s "${RUNNER_TEMP}/reset-changelogs" ]]
 
       # A changelog tracked on the default branch must come back to its
       # committed state, however it was mangled. The fixture config names
@@ -115,9 +181,11 @@ jobs:
           set -euo pipefail
           echo "accumulated prerelease entry" >> README.md
 
-      - uses: ./actions/reset-changelogs
-        with:
-          knope-config: tests/fixtures/knope.toml
+      - name: Reset changelogs
+        env:
+          DEFAULT_BRANCH: main
+          KNOPE_CONFIG: tests/fixtures/knope.toml
+        run: bash "${RUNNER_TEMP}/reset-changelogs"
 
       - name: Check it was restored
         run: |
@@ -141,9 +209,11 @@ jobs:
           printf '[package]\nchangelog = "NEW-CHANGELOG.md"\n' > untracked-knope.toml
           echo "brand new" > NEW-CHANGELOG.md
 
-      - uses: ./actions/reset-changelogs
-        with:
-          knope-config: untracked-knope.toml
+      - name: Reset changelogs
+        env:
+          DEFAULT_BRANCH: main
+          KNOPE_CONFIG: untracked-knope.toml
+        run: bash "${RUNNER_TEMP}/reset-changelogs"
 
       - name: Check it was removed
         run: |
@@ -156,9 +226,11 @@ jobs:
       # A repository with no knope.toml must be a no-op, not an error.
       - name: A missing config is not an error
         run: rm -f untracked-knope.toml
-      - uses: ./actions/reset-changelogs
-        with:
-          knope-config: does-not-exist.toml
+      - name: Reset changelogs
+        env:
+          DEFAULT_BRANCH: main
+          KNOPE_CONFIG: does-not-exist.toml
+        run: bash "${RUNNER_TEMP}/reset-changelogs"
 
   ci-gate:
     name: CI gate

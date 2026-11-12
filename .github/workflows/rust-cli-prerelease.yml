@@ -60,8 +60,11 @@ on:
         required: true
 
 jobs:
+  # A local `./.github/workflows/` path resolves to the same commit as this
+  # workflow, even for a caller in another repository, so pinning this
+  # workflow pins these too.
   draft:
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/prepare-prerelease.yml@v0.4.10
+    uses: ./.github/workflows/prepare-prerelease.yml
     with:
       prerelease-label: ${{ inputs.prerelease-label }}
       knope-workflow: ${{ inputs.draft-knope-workflow }}
@@ -74,7 +77,7 @@ jobs:
   # started at, which predates the version bump the draft stage just pushed.
   build:
     needs: draft
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-cli-build.yml@v0.4.10
+    uses: ./.github/workflows/rust-cli-build.yml
     with:
       bin: ${{ inputs.bin }}
       matrix: ${{ inputs.matrix }}
@@ -83,7 +86,7 @@ jobs:
 
   publish:
     needs: build
-    uses: rigetti/qcs-gha-infrastructure/.github/workflows/publish-release.yml@v0.4.10
+    uses: ./.github/workflows/publish-release.yml
     with:
       artifact-path: ${{ inputs.artifact-path }}
       knope-workflow: ${{ inputs.publish-knope-workflow }}

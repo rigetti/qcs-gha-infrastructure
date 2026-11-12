@@ -71,16 +71,63 @@ jobs:
   integration:
     runs-on: ${{ inputs.runs-on }}
     environment: ${{ inputs.environment }}
+    # Inputs of the inlined setup-rust steps; see scripts/check-inlined-steps.
+    env:
+      SETUP_RUST_TOOLCHAIN: ${{ inputs.toolchain }}
+      SETUP_RUST_COMPONENTS: ""
+      SETUP_RUST_TARGETS: ""
+      SETUP_RUST_CACHE: ${{ inputs.cache }}
+      SETUP_RUST_CACHE_KEY: ${{ inputs.cache-key }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.4.10
+      # setup-rust, inlined: keep every copy identical (scripts/check-inlined-steps).
+      - name: Install Rust toolchain (setup-rust)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain none --profile minimal
+            echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+            export PATH="${HOME}/.cargo/bin:${PATH}"
+          fi
+          rustup toolchain install "${SETUP_RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${SETUP_RUST_TOOLCHAIN}"
+          # Both lists are space-separated, so word splitting is intended.
+          # shellcheck disable=SC2086
+          for component in ${SETUP_RUST_COMPONENTS}; do
+            rustup component add --toolchain "${SETUP_RUST_TOOLCHAIN}" "${component}"
+          done
+          # shellcheck disable=SC2086
+          for target in ${SETUP_RUST_TARGETS}; do
+            rustup target add --toolchain "${SETUP_RUST_TOOLCHAIN}" "${target}"
+          done
+          rustc --version
+          cargo --version
+      - name: Configure cargo for CI (setup-rust)
+        shell: bash
+        run: |
+          {
+            echo "CARGO_TERM_COLOR=always"
+            echo "CARGO_INCREMENTAL=0"
+            echo "RUSTUP_TOOLCHAIN=${SETUP_RUST_TOOLCHAIN}"
+          } >> "${GITHUB_ENV}"
+      - name: Cache cargo registry (setup-rust)
+        if: env.SETUP_RUST_CACHE == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          toolchain: ${{ inputs.toolchain }}
-          cache-key: ${{ inputs.cache-key }}
-          cache: ${{ inputs.cache }}
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-${{ env.SETUP_RUST_CACHE_KEY }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-${{ env.SETUP_RUST_CACHE_KEY }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-
       - name: Run integration tests
         env:
           GH_TOKEN: ${{ secrets.github-api-token }}

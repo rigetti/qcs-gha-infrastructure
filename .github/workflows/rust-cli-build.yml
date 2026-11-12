@@ -51,6 +51,15 @@ jobs:
             {"runs-on": "windows-latest",   "target": "x86_64-pc-windows-msvc"}
           ]') }}
     runs-on: ${{ matrix.runs-on }}
+    # Inputs of the inlined setup-rust steps; see scripts/check-inlined-steps.
+    env:
+      SETUP_RUST_TOOLCHAIN: ${{ inputs.toolchain }}
+      SETUP_RUST_COMPONENTS: ""
+      SETUP_RUST_TARGETS: ${{ matrix.target }}
+      # A release build happens once per release; a cache would mostly be a
+      # cold miss, and CARGO_TARGET_DIR is outside the cached path anyway.
+      SETUP_RUST_CACHE: "false"
+      SETUP_RUST_CACHE_KEY: default
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,13 +70,51 @@ jobs:
       - name: Use a short target directory
         shell: bash
         run: echo "CARGO_TARGET_DIR=${RUNNER_TEMP}/t" >> "${GITHUB_ENV}"
-      - uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@v0.4.10
+      # setup-rust, inlined: keep every copy identical (scripts/check-inlined-steps).
+      - name: Install Rust toolchain (setup-rust)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain none --profile minimal
+            echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+            export PATH="${HOME}/.cargo/bin:${PATH}"
+          fi
+          rustup toolchain install "${SETUP_RUST_TOOLCHAIN}" --profile minimal --no-self-update
+          rustup default "${SETUP_RUST_TOOLCHAIN}"
+          # Both lists are space-separated, so word splitting is intended.
+          # shellcheck disable=SC2086
+          for component in ${SETUP_RUST_COMPONENTS}; do
+            rustup component add --toolchain "${SETUP_RUST_TOOLCHAIN}" "${component}"
+          done
+          # shellcheck disable=SC2086
+          for target in ${SETUP_RUST_TARGETS}; do
+            rustup target add --toolchain "${SETUP_RUST_TOOLCHAIN}" "${target}"
+          done
+          rustc --version
+          cargo --version
+      - name: Configure cargo for CI (setup-rust)
+        shell: bash
+        run: |
+          {
+            echo "CARGO_TERM_COLOR=always"
+            echo "CARGO_INCREMENTAL=0"
+            echo "RUSTUP_TOOLCHAIN=${SETUP_RUST_TOOLCHAIN}"
+          } >> "${GITHUB_ENV}"
+      - name: Cache cargo registry (setup-rust)
+        if: env.SETUP_RUST_CACHE == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          toolchain: ${{ inputs.toolchain }}
-          targets: ${{ matrix.target }}
-          # A release build happens once per release; a cache would mostly be a
-          # cold miss, and CARGO_TARGET_DIR is outside the cached path anyway.
-          cache: "false"
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-${{ env.SETUP_RUST_CACHE_KEY }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-${{ env.SETUP_RUST_CACHE_KEY }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ env.SETUP_RUST_TOOLCHAIN }}-
 
       - name: Install musl toolchain
         if: endsWith(matrix.target, '-linux-musl')

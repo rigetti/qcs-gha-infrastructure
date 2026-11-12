@@ -2,57 +2,38 @@
 
 [![Latest release](https://img.shields.io/github/v/release/rigetti/qcs-gha-infrastructure)](https://github.com/rigetti/qcs-gha-infrastructure/releases/tag/v0.4.10)
 
-Shared GitHub Actions and reusable workflows for QCS repositories.
+Shared reusable workflows for QCS repositories.
 
-## Composite actions
+## Why there are no composite actions
 
-### `actions/setup-rust`
+This repository used to ship two composite actions,
+`actions/setup-rust` and `actions/reset-changelogs`.
+They were removed in favor of steps copied into each workflow that used them.
 
-Installs a Rust toolchain with rustup and sets up compilation caching.
+A reusable workflow cannot use a composite action from its own repository
+without pinning it by tag:
+a step-level `uses: ./actions/...` resolves against the *caller's* checkout,
+not against this repository.
+A tag pin, in turn, has to name the version being released,
+so every release had to rewrite it in the commit the tag points at.
+Nested reusable workflows do not have that problem;
+see [Nested workflows](#nested-workflows).
 
-```yaml
-- uses: rigetti/qcs-gha-infrastructure/actions/setup-rust@main
-  with:
-    toolchain: stable        # optional
-    components: clippy       # optional, space-separated
-    targets: x86_64-unknown-linux-musl  # optional, space-separated
-    cache: "true"            # optional; "false" for untrusted code
-    cache-key: clippy        # optional cache discriminator
-    sccache: "false"         # optional; see the caching notes below
-```
+The copies are kept identical by `scripts/check-inlined-steps`,
+which the `lint` job runs.
+A former caller of `actions/setup-rust` can copy the three steps named
+`... (setup-rust)` from `rust-ci.yml`, together with the job's `SETUP_RUST_*`
+variables, or call `rust-ci.yml` instead.
+Older tags (`v0.4.10` and earlier) still contain both actions.
 
-**Caching.** By default this caches the cargo registry and `./target` with
-`actions/cache`.
-
-Setting `sccache: "true"` instead installs
-[sccache](https://github.com/mozilla/sccache) via
-`mozilla-actions/sccache-action` and sets `RUSTC_WRAPPER=sccache` with
-`SCCACHE_GHA_ENABLED=true`. To answer the obvious question: yes, sccache's
-`gha` backend is **GitHub's own Actions cache service** under the hood — the
-same backing store `actions/cache` writes to, reported as
-`Cache location  ghac, …` in the post-run stats. There is no external cache
-infrastructure to run. In principle its granularity beats a target-directory
-archive, which one dependency bump invalidates wholesale. `CARGO_INCREMENTAL=0`
-is set either way, which sccache requires.
-
-In practice, measured on `todo-curator` (sccache 0.17.0, four platforms):
-
-| | target-dir cache | sccache |
-|---|---|---|
-| `clippy` | 72s | 108s |
-| `test` | 102s | 119s |
-| integration jobs | 36–49s | 123–130s |
-
-Hit rate was **0%** across repeat runs of identical code, with ~151 `Cache write
-errors` per job against 194 successful writes. Two things contribute: sccache
-cannot cache `cargo check` or `clippy` at all (they only emit metadata), and
-whatever is failing those writes also prevents reuse in the full builds. So this
-is off by default, and worth revisiting for build-dominated jobs only — check
-the post-run stats block rather than assuming it helps.
-
-Both paths respect `cache: "false"`, which disables caching entirely — use that
-when building untrusted code, so its artifacts never land in a cache that a
-later trusted run would read.
+**Caching.** The `clippy` and `test` jobs of `rust-ci.yml`,
+and the `integration` job of `rust-integration-tests.yml`,
+cache the cargo registry and `./target` with `actions/cache`;
+the latter skips it when its `cache` input is false.
+The composite action's opt-in sccache support was not carried over:
+measured on `todo-curator` (sccache 0.17.0, four platforms),
+its `gha` backend reached a 0% hit rate,
+and jobs ran 1.5 to 3 times slower than with the target-directory cache.
 
 ## Reusable workflows
 
@@ -343,18 +324,11 @@ Run workflow dropdown with no way to restrict the list, which is why this is a
 workflow-level check rather than configuration. `default-branch` (default
 `main`) names the branch to refuse.
 
-### `actions/reset-changelogs`
+### Changelog reset in `prepare-release.yml` and `prepare-prerelease.yml`
 
-Restores every changelog named in `knope.toml` to its state on the default
-branch. Used by `prepare-release.yml` and `prepare-prerelease.yml` before knope
-runs; rarely called directly.
-
-```yaml
-- uses: rigetti/qcs-gha-infrastructure/actions/reset-changelogs@v0.4.0
-  with:
-    default-branch: main        # optional
-    knope-config: knope.toml    # optional
-```
+Before knope runs, both workflows restore every changelog named in
+`knope.toml` to its state on the default branch.
+(This was the `actions/reset-changelogs` composite action up to `v0.4.10`.)
 
 **Why.** Every prerelease runs `PrepareRelease`, and `PrepareRelease` writes the
 pending changes into the changelog. Cut three release candidates from one branch
@@ -384,33 +358,32 @@ pull request, where the checkout is a merge ref, it finds none and reads the
 version as `0.0.0`. A file in the tree is unambiguous wherever it is checked
 out, and a badge is a version someone actually looks at.
 
-The release also rewrites this repository's **internal pins**: the reusable
-workflows reference this repository's own actions by tag, and those references
-must name the version being released, in the commit the tag will point at —
-otherwise a caller pinning a workflow at `v1.2.3` gets the previous version's
-action underneath it, silently.
-
-Each such file is declared in `versioned_files`, so knope rewrites them and
-refuses to release when any disagrees. One regex covers every occurrence in a
-file. The only remaining gap is a *new* file carrying a pin that `knope.toml`
-does not mention, which the `lint` job checks for.
+Nothing else in the tree names a version of this repository:
+no workflow here references this repository by tag
+(see [Nested workflows](#nested-workflows)),
+and the `lint` job fails if one starts to.
 
 ## Self-checks
 
-`.github/workflows/ci.yml` smoke-tests this repository's own actions on every
-pull request. Not exhaustive — the point is that a change breaking an action
-fails here rather than in a consumer's pipeline:
+`.github/workflows/ci.yml` smoke-tests this repository's own steps on every
+pull request. Not exhaustive: the point is that a change breaking a step
+fails here rather than in a consumer's pipeline.
 
-- **lint** — `actionlint` over every workflow (which also runs shellcheck on each
-  `run:` block), `shellcheck` over `scripts/`, and a check that each ruleset JSON
-  parses and has the keys the API requires.
-- **scripts** — `scripts/test-apply-ruleset`, which covers argument handling
+- **lint**: `actionlint` over every workflow (which also runs shellcheck on each
+  `run:` block), `shellcheck` over `scripts/`, a check that each ruleset JSON
+  parses and has the keys the API requires,
+  a check that no workflow references this repository by tag,
+  and `scripts/check-inlined-steps`, which fails when the copies of an inlined
+  step drift apart.
+- **scripts**: `scripts/test-apply-ruleset`, which covers argument handling
   offline. Runnable locally, including under the bash macOS ships:
   `/bin/bash scripts/test-apply-ruleset`.
-- **setup-rust** — installs a toolchain with components and an extra target on
+- **setup-rust**: runs the inlined setup-rust steps
+  with components and an extra target on
   Linux, macOS, and Windows, then checks `cargo`, `clippy`, `rustfmt`, the target
   list, and the environment variables consumers depend on.
-- **reset-changelogs** — exercises all three paths: a tracked changelog is
+- **reset-changelogs**: runs the "Reset changelogs" script from
+  `prepare-release.yml` through all three paths: a tracked changelog is
   restored, an untracked one is deleted, and a missing config is a no-op.
 
 Deliberately not here: a repository that consumes these workflows for real. The
@@ -462,8 +435,8 @@ reason this is per-repository.
 
 ## Pinning
 
-**Every `uses:` in this repository is either a commit SHA or a tag in a
-repository we control. Keep it that way.**
+**Every `uses:` in this repository is either a commit SHA or a local
+`./.github/workflows/` path. Keep it that way.**
 
 ### Why third-party actions are pinned by SHA
 
@@ -511,8 +484,8 @@ Two mechanics worth knowing:
 ### Keeping the pins current here
 
 `.github/dependabot.yml` runs the `github-actions` ecosystem weekly over
-`.github/workflows` and each composite action's directory — the latter are only
-scanned when listed explicitly. Minor and patch bumps are grouped into one pull
+`.github/workflows`. It rewrites every copy of an inlined step's pin at once,
+so the copies stay identical. Minor and patch bumps are grouped into one pull
 request; major bumps arrive separately, since those deserve to be read.
 
 A consumer repository wants the same file: pinning without an update path is
@@ -530,12 +503,22 @@ uses: rigetti/qcs-gha-infrastructure/.github/workflows/rust-ci.yml@v0.1.0
 
 The usage examples above say `@main` for brevity. Real callers should not.
 
-### Bumping this repository's own tag
+### Nested workflows
 
-The composite-action references *inside* these reusable workflows are pinned to
-the matching release tag, so pinning a workflow pins what it uses transitively —
-otherwise a caller would pin the outer layer while the action underneath kept
-floating.
+`rust-cli-release.yml` and `rust-cli-prerelease.yml` call other workflows of
+this repository as `uses: ./.github/workflows/<file>.yml`.
+GitHub resolves such a path to the same commit as the calling workflow,
+even when that workflow was itself called from another repository
+(["the called workflow is from the same commit as the caller
+workflow"](https://docs.github.com/en/actions/using-workflows/reusing-workflows#calling-a-reusable-workflow)).
+So pinning the outer workflow to a tag pins everything it calls,
+with nothing to rewrite at release time.
 
-That makes a release a two-step change: update the internal references to the
-new tag **in the same commit the tag will point at**, then tag that commit.
+A *step*-level local path is different:
+`uses: ./actions/<name>` inside a called workflow resolves against the
+caller's checkout, which is why this repository has no composite actions.
+Both behaviors were verified with a cross-repository caller;
+see the pull request that introduced this section (#25).
+
+Secrets are still passed explicitly at each level,
+and a called workflow can only narrow the permissions it inherits.
