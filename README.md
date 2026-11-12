@@ -89,11 +89,125 @@ jobs:
         ]
 ```
 
+`version` (optional) builds the binary as that version, e.g. `1.3.0-rc.0`,
+by running `release-plz set-version` in the runner's checkout.
+Nothing is committed.
+`release-plz-prerelease.yml` uses this.
+
 `musl-tools` is installed and `CC_<target>` set automatically for musl targets.
 `CARGO_TARGET_DIR` is moved under `RUNNER_TEMP` so deep dependency trees do not
 overrun Windows' path limit.
 
-### `rust-cli-release.yml` and `rust-cli-prerelease.yml`
+### `release-plz.yml`
+
+Releases with [release-plz](https://release-plz.dev) using only `GITHUB_TOKEN`:
+no PAT and no GitHub App.
+Replaces `prepare-release.yml`, `rust-cli-release.yml`, and `publish-release.yml`.
+Wire it to pushes on the default branch.
+
+```yaml
+# .github/workflows/release-plz.yml
+name: release-plz
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release-plz:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/release-plz.yml@main
+    with:
+      bin: my-cli     # omit if the repository ships no binaries
+    # secrets:
+    #   token: ${{ secrets.RELEASE_TOKEN }}  # optional; see below
+```
+
+```toml
+# release-plz.toml
+[workspace]
+git_only = true            # versions come from tags; no `cargo publish`
+git_release_draft = true   # required when `bin` is set
+git_release_type = "auto"  # prerelease versions become GitHub prereleases
+```
+
+Every push runs, in order:
+
+| Job | What it does |
+|---|---|
+| `release` | `release-plz release`: tags and creates the GitHub release if the version in the tree has no tag yet. That only happens after someone merges a release PR. |
+| `build` | With `bin`: builds the binaries from the new tag, on every platform. |
+| `publish` | With `bin`: uploads the binaries to the draft release, checks they are all there, then publishes it. |
+| `release-pr` | `release-plz release-pr`: opens or updates the release PR for what is now unreleased. |
+
+A human merges the release PR; that push releases.
+Nothing relies on a workflow triggered by a tag, a release, or a `GITHUB_TOKEN`
+push, because none of those start runs.
+
+With `bin` set, the release is a draft until its binaries are attached,
+so it is never visible without them.
+The workflow refuses to release unless `git_release_draft = true` is configured.
+The tag exists while the release is still a draft.
+If `build` or `publish` fails, re-run the failed jobs of that run:
+a fresh run sees the tag and releases nothing.
+
+**Requirements.**
+
+- The calling job grants at least `contents: write` and `pull-requests: write`.
+  A called workflow's `permissions` can only narrow the caller's.
+- Settings > Actions > General > "Allow GitHub Actions to create and approve
+  pull requests" is on.
+- Pull requests opened with `GITHUB_TOKEN` get no automatic `pull_request` runs.
+  GitHub holds them as `action_required` until someone approves the run,
+  and an approved run satisfies required checks.
+  A dispatched CI run does not attach to the pull request.
+  Passing the optional `token` secret (a PAT or app token) avoids this,
+  but nothing here needs it.
+- Merge release PRs with the default merge-commit strategy,
+  or set `release_always = false`.
+  See [what commit is released](https://release-plz.dev/docs/usage/release#what-commit-is-released).
+- Only one package per repository can ship binaries (`package`, default `bin`).
+
+### `release-plz-prerelease.yml`
+
+Publishes a release candidate from the branch it is dispatched on.
+Replaces `rust-cli-prerelease.yml`.
+release-plz has no prerelease flow, so this does not use it to release.
+It builds the branch's binaries as the requested version
+(`release-plz set-version`, applied in the runner only),
+then creates a draft release, attaches the binaries, and publishes it as a prerelease.
+
+```yaml
+# .github/workflows/prerelease.yml
+name: Prerelease
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Prerelease version, e.g. 1.3.0-rc.0"
+        required: true
+
+jobs:
+  prerelease:
+    permissions:
+      contents: write
+    uses: rigetti/qcs-gha-infrastructure/.github/workflows/release-plz-prerelease.yml@main
+    with:
+      bin: my-cli
+      version: ${{ inputs.version }}
+```
+
+Differences from the knope flow:
+nothing is committed or pushed,
+so the tag `v<version>` points at the branch head with its old `Cargo.toml` version
+(the binaries report the new one);
+the version is explicit, and nothing computes the next `rc.N`;
+no changelog is written.
+The default branch is refused.
+
+### `rust-cli-release.yml` and `rust-cli-prerelease.yml` (deprecated)
 
 The whole **release-with-assets** pattern, for a repository that ships
 binaries. Most callers want these two rather than the pieces they compose
@@ -220,7 +334,7 @@ scope once approved. The reviewer is the whole control. Read the diff — build
 scripts, proc macros, `Cargo.toml` patches, and test fixtures included — before
 approving, and pin the environment's reviewers to maintainers only.
 
-### `prepare-release.yml`
+### `prepare-release.yml` (deprecated)
 
 The automatic half of a knope release. Nothing to configure, and no way to run
 it by hand:
@@ -256,7 +370,7 @@ jobs:
 downstream — a binary build, say. Pushes made with `GITHUB_TOKEN` do not start
 new workflow runs.
 
-### `publish-release.yml`
+### `publish-release.yml` (deprecated)
 
 The second half of a **split release**, for repositories that attach build
 artifacts. The caller's `draft-release` knope workflow prepares and pushes the
@@ -311,7 +425,7 @@ their `knope-workflow` input:
       knope-workflow: draft-release
 ```
 
-### `prepare-prerelease.yml`
+### `prepare-prerelease.yml` (deprecated)
 
 The manual half: cuts a release candidate from the branch it is dispatched on,
 so it can be installed and tested before merging. Wire it to
@@ -343,7 +457,7 @@ Run workflow dropdown with no way to restrict the list, which is why this is a
 workflow-level check rather than configuration. `default-branch` (default
 `main`) names the branch to refuse.
 
-### `actions/reset-changelogs`
+### `actions/reset-changelogs` (deprecated)
 
 Restores every changelog named in `knope.toml` to its state on the default
 branch. Used by `prepare-release.yml` and `prepare-prerelease.yml` before knope
@@ -365,6 +479,29 @@ its own.
 
 A changelog that does not exist on the default branch is deleted rather than
 restored: it is new in this branch, so its correct prior state is absent.
+
+## Migrating from knope to release-plz
+
+The knope workflows (`prepare-release.yml`, `prepare-prerelease.yml`,
+`publish-release.yml`, `rust-cli-release.yml`, `rust-cli-prerelease.yml`,
+and `actions/reset-changelogs`) are **deprecated**.
+They are unchanged for callers pinned to a tag, so nothing breaks on upgrade.
+Their removal will be a separate breaking release.
+(`prepare-prerelease.yml` and `rust-cli-prerelease.yml` now accept a missing
+`token` and fall back to `GITHUB_TOKEN`; that change is not breaking.)
+
+To migrate a caller:
+
+1. Add `release-plz.toml` (see `release-plz.yml` above) and delete `knope.toml`.
+   Changelog entries come from Conventional Commits, as before.
+2. Replace the knope caller workflows with the `release-plz.yml` caller,
+   and the prerelease caller with `release-plz-prerelease.yml`.
+3. Turn on "Allow GitHub Actions to create and approve pull requests".
+4. Release flow changes: pushes to the default branch no longer release.
+   They open or update a release PR; merging it releases.
+5. Make the release PR's checks pass: approve its `action_required` run,
+   or pass a PAT or app token as `token`.
+6. Delete `RELEASE_TOKEN` once nothing else uses it.
 
 ## Releasing
 
