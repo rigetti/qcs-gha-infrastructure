@@ -4,6 +4,11 @@ name: release-plz prerelease
 # dispatched on, using only the job's `GITHUB_TOKEN`. Wire it to
 # `workflow_dispatch` only. Replaces `rust-cli-prerelease.yml`.
 #
+# The purpose of this flow is to let consumers use a version of the tool that
+# includes unmerged work, for example to try a branch in another repository's
+# CI before the change lands. It is not a release candidate of the next
+# release: the tag points at the branch head, not at a release PR.
+#
 # release-plz has no prerelease flow: it releases the version in the tree, and
 # its release PR computes the next stable version. So this does not use
 # release-plz to release anything. Instead it
