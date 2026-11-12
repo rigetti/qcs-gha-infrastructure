@@ -8,6 +8,7 @@ updates:
   # `directories` rather than `directory`: the github-actions ecosystem scans
   # `.github/workflows` under `/`, and a composite action's `action.yml` is
   # only seen when its own directory is listed.
+  # There are none at present; list the directory of any that is added.
   #
   # The `fix:` commit-message prefix ensures that updates are consumable downstream.
   - package-ecosystem: github-actions
@@ -15,8 +16,6 @@ updates:
       prefix: "fix:"
     directories:
       - /
-      - /actions/setup-rust
-      - /actions/reset-changelogs
     schedule:
       interval: weekly
     groups:

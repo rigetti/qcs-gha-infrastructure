@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Checks that the copies of steps inlined from the former composite actions
+# have not drifted apart.
+#
+# This repository has no composite actions on purpose: a step-level
+# `uses: ./actions/...` resolves against the *caller's* checkout, so a reusable
+# workflow called from another repository cannot use a local action, and a
+# tag-pinned self-reference has to be rewritten on every release. So the steps
+# are copied into each workflow instead, and this script keeps the copies
+# honest:
+#
+# - every job carrying the setup-rust steps carries the same ones, in the same
+#   order, and sets every `SETUP_RUST_*` variable they read;
+# - the "Reset changelogs" step is the same in both prepare workflows.
+#
+# Needs yq (mikefarah's v4, as on GitHub's runners, or the jq wrapper) and jq.
+#
+#   scripts/check-inlined-steps
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# Both yq flavors understand the expressions below; only the flags differ.
+yq_json() {
+  if yq --version 2>&1 | grep -q mikefarah; then
+    yq -o=json -I=0 "$@"
+  else
+    yq -c "$@"
+  fi
+}
+
+failed=0
+fail() {
+  echo "::error::$*"
+  failed=1
+}
+
+# One JSON line per job that has any setup-rust step: the job's env and its
+# setup-rust steps, in order.
+# Errors are propagated explicitly (`set -e` does not reach into command
+# substitutions), so that a yq or jq failure fails the script rather than
+# silently dropping a file from the comparison.
+setup_rust_jobs() {
+  local file jobs
+  for file in .github/workflows/*.yml .github/workflows/*.yaml; do
+    [[ -e "${file}" ]] || continue
+    jobs="$(yq_json '
+      .jobs | to_entries | .[]
+      | select(.value.steps)
+      | {"job": .key,
+         "env": (.value.env // {}),
+         "steps": [.value.steps[] | select((.name // "") | test("[(]setup-rust[)]$"))]}
+      | select((.steps | length) > 0)
+    ' "${file}")" || return 1
+    if [[ -n "${jobs}" ]]; then
+      jq -c --arg file "${file}" '. + {file: $file}' <<<"${jobs}" || return 1
+    fi
+  done
+}
+
+expected_names='[
+  "Install Rust toolchain (setup-rust)",
+  "Configure cargo for CI (setup-rust)",
+  "Cache cargo registry (setup-rust)"
+]'
+
+jobs_json="$(setup_rust_jobs)"
+if [[ -z "${jobs_json}" ]]; then
+  fail "no job carries the setup-rust steps; has the step naming changed?"
+else
+  # Every SETUP_RUST_* variable the steps mention must be set in the job's own
+  # `env` (a workflow-level `env` is reported too: keep them next to the steps).
+  problems="$(jq -s -r --argjson names "${expected_names}" '
+    .[0] as $first
+    | ($first.steps | tojson | [scan("SETUP_RUST_[A-Z_]+")] | unique) as $vars
+    | (if ($first.steps | map(.name)) != $names
+       then "\($first.file) (\($first.job)): expected the setup-rust steps \($names)"
+       else empty end),
+      (.[] as $job
+       | (if $job.steps != $first.steps
+          then "\($job.file) (\($job.job)): setup-rust steps differ from \($first.file) (\($first.job))"
+          else empty end),
+         (if ($job.env | type) != "object"
+          then "\($job.file) (\($job.job)): job env must be a literal mapping"
+          else ($vars - ($job.env | keys))[]
+            | "\($job.file) (\($job.job)): job env does not set \(.)"
+          end))
+  ' <<<"${jobs_json}")"
+  while IFS= read -r problem; do
+    [[ -n "${problem}" ]] && fail "${problem}"
+  done <<<"${problems}"
+  echo "setup-rust copies checked:"
+  jq -r '"  \(.file) (\(.job))"' <<<"${jobs_json}"
+fi
+
+reset_step() {
+  yq_json '.jobs[].steps[] | select(.name == "Reset changelogs")' "$1"
+}
+release_copy="$(reset_step .github/workflows/prepare-release.yml)"
+prerelease_copy="$(reset_step .github/workflows/prepare-prerelease.yml)"
+if [[ -z "${release_copy}" ]]; then
+  fail "prepare-release.yml has no \"Reset changelogs\" step"
+elif [[ "${release_copy}" != "${prerelease_copy}" ]]; then
+  fail "the \"Reset changelogs\" steps of prepare-release.yml and prepare-prerelease.yml differ"
+else
+  echo "Reset changelogs: prepare-release.yml and prepare-prerelease.yml agree"
+fi
+
+exit "${failed}"

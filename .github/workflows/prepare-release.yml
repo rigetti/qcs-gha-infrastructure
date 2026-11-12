@@ -111,11 +111,81 @@ jobs:
 
       # Repeated prereleases from one branch would otherwise accumulate
       # changelog entries: each PrepareRelease writes the pending changes on
-      # top of what the previous one already wrote.
+      # top of what the previous one already wrote. Cut three release
+      # candidates from a branch and the third changelog entry contains the
+      # first two as well, which then lands on the default branch when the
+      # branch merges.
+      #
+      # So restore each changelog named in knope.toml to its state on the
+      # default branch first. A changelog that does not exist there is deleted
+      # rather than restored: it is new in this branch, so its correct prior
+      # state is "absent".
+      #
+      # Formerly the `actions/reset-changelogs` composite action. Keep this
+      # step identical in prepare-release.yml and prepare-prerelease.yml;
+      # ci.yml checks that, and tests prepare-release.yml's copy.
       - name: Reset changelogs
-        uses: rigetti/qcs-gha-infrastructure/actions/reset-changelogs@v0.4.10
-        with:
-          default-branch: ${{ inputs.default-branch }}
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ inputs.default-branch }}
+          KNOPE_CONFIG: knope.toml
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "${KNOPE_CONFIG}" ]]; then
+            echo "No ${KNOPE_CONFIG}; nothing to reset."
+            exit 0
+          fi
+
+          # knope.toml declares either one [package] or a [packages] table, each
+          # optionally naming a changelog. tomllib ships with the runner's
+          # Python, so this needs nothing installed.
+          # A while-read loop rather than mapfile, which is bash 4 and so absent
+          # from the bash macOS ships; this should run the same locally.
+          changelogs=()
+          while IFS= read -r line; do
+            changelogs+=("${line}")
+          done < <(python3 - "${KNOPE_CONFIG}" <<'PY'
+          import sys, tomllib
+
+          with open(sys.argv[1], "rb") as f:
+              config = tomllib.load(f)
+
+          packages = config.get("packages")
+          if packages:
+              entries = packages.values()
+          else:
+              entries = [config.get("package", {})]
+
+          for entry in entries:
+              changelog = entry.get("changelog")
+              if changelog:
+                  print(changelog)
+          PY
+          )
+
+          if [[ ${#changelogs[@]} -eq 0 ]]; then
+            echo "No changelog declared in ${KNOPE_CONFIG}; nothing to reset."
+            exit 0
+          fi
+
+          # The default branch is not necessarily checked out, and a shallow
+          # clone may not have it at all.
+          git fetch --no-tags --depth=1 origin "${DEFAULT_BRANCH}"
+
+          for changelog in "${changelogs[@]}"; do
+            if git cat-file -e "FETCH_HEAD:${changelog}" 2>/dev/null; then
+              echo "Restoring ${changelog} from origin/${DEFAULT_BRANCH}"
+              git restore --source=FETCH_HEAD -- "${changelog}"
+            elif [[ -e "${changelog}" ]]; then
+              echo "${changelog} does not exist on ${DEFAULT_BRANCH}; removing it"
+              rm -f "${changelog}"
+            else
+              echo "${changelog} exists on neither side; nothing to do"
+            fi
+          done
+
+          git status --short
 
       - name: Dry-run release
         if: github.event_name == 'pull_request'
