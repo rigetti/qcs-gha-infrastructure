@@ -85,7 +85,7 @@ jobs:
       matrix: |
         [
           {"runs-on": "ubuntu-latest", "target": "x86_64-unknown-linux-musl"},
-          {"runs-on": "macos-14",      "target": "aarch64-apple-darwin"}
+          {"runs-on": "macos-latest", "target": "aarch64-apple-darwin"}
         ]
 ```
 
