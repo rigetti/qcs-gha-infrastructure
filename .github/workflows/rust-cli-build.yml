@@ -33,6 +33,15 @@ on:
         type: string
         required: false
         default: ""
+      version:
+        description: >-
+          Version to build as, e.g. `1.2.3-rc.0`. Empty builds the version in
+          Cargo.toml. Set by `release-plz-prerelease.yml`, which builds a
+          version nothing has committed; the edit stays in the runner's
+          checkout.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -68,6 +77,25 @@ jobs:
           # A release build happens once per release; a cache would mostly be a
           # cold miss, and CARGO_TARGET_DIR is outside the cached path anyway.
           cache: "false"
+
+      - name: Set the version
+        if: inputs.version != ''
+        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+        with:
+          tool: release-plz
+
+      # `set-version` also edits the changelog and fails when there is none, so
+      # it gets a config that turns that off. The edit is never committed.
+      - name: Apply the version
+        if: inputs.version != ''
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          printf '[workspace]\nchangelog_update = false\n' > "${RUNNER_TEMP}/set-version.toml"
+          release-plz set-version --config "${RUNNER_TEMP}/set-version.toml" "${VERSION}"
+          git diff --stat
 
       - name: Install musl toolchain
         if: endsWith(matrix.target, '-linux-musl')
