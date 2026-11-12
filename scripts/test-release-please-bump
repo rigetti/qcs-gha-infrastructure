@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Run the prerelease workflow's "Bump the version files" step, verbatim, against
+# a copy of this repository, then check the result with lint-release-pins.
+#
+# Needs network (npm installs release-please) unless RP_DIR points at a
+# directory that already has node_modules/release-please. Needs node 22+, yq
+# (mikefarah or python-yq), and jq.
+#
+#   scripts/test-release-please-bump [VERSION]    # default 99.0.0-rc.1
+#
+# This is what proves, on this repository's real files, that:
+#   - the README badge, the only annotated version here, is rewritten and keeps
+#     its `v` prefix;
+#   - no other line changes (the first semver on an annotated line is the one
+#     rewritten, so the result is only as good as the annotations).
+# No workflow here pins this repository by tag (the `lint` job enforces
+# that), so the config lists no workflow file.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+version="${1:-99.0.0-rc.1}"
+workflow="${root}/.github/workflows/release-please-prerelease.yml"
+config=".github/release-please/config.json"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "${tmp}"' EXIT
+
+# A pristine copy of the tracked content the config touches.
+copy="${tmp}/repo"
+mkdir -p "${copy}"
+(cd "${root}" && cp -R .github README.md "${copy}/")
+
+# The step's script, exactly as the workflow has it.
+yq -r '.jobs.prepare.steps[] | select(.id == "bump") | .run' "${workflow}" >"${tmp}/bump.sh"
+
+export RUNNER_TEMP="${tmp}/runner"
+mkdir -p "${RUNNER_TEMP}"
+if [[ -n "${RP_DIR:-}" ]]; then
+    mkdir -p "${RUNNER_TEMP}/rp"
+    ln -s "${RP_DIR}/node_modules" "${RUNNER_TEMP}/rp/node_modules"
+fi
+
+(
+    cd "${copy}"
+    export NEW_VERSION="${version}" CONFIG_FILE="${config}" PACKAGE="." RP_VERSION="17.11.2"
+    bash "${tmp}/bump.sh"
+)
+
+# Every changed line must hold the new version and nothing else must change.
+failures=0
+while IFS= read -r f; do
+    if ! cmp -s "${root}/${f}" "${copy}/${f}"; then
+        while IFS= read -r line; do
+            case "${line}" in
+                ">"*) if [[ "${line}" != *"v${version}"* ]]; then
+                        echo "FAIL ${f}: changed line lacks v${version}: ${line}"
+                        failures=$((failures + 1))
+                      fi ;;
+            esac
+        done < <(diff "${root}/${f}" "${copy}/${f}" || true)
+    fi
+done < <(cd "${root}" && find .github README.md -type f | sort)
+
+# And the linter must agree the copy is consistent with the new version.
+echo "{\".\": \"${version}\"}" >"${tmp}/manifest.json"
+(cd "${copy}" && "${root}/scripts/lint-release-pins" \
+    --config "${config}" --manifest "${tmp}/manifest.json" \
+    --no-scan) || failures=$((failures + 1))
+
+# The prefix survives: the badge links `releases/tag/v<version>`.
+if ! grep -q "releases/tag/v${version})" "${copy}/README.md"; then
+    echo "FAIL: the badge does not read v${version} after the bump"
+    failures=$((failures + 1))
+fi
+
+if [[ "${failures}" -ne 0 ]]; then
+    echo "${failures} failure(s)"
+    exit 1
+fi
+echo "bump ok: the badge now reads v${version}"

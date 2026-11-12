@@ -1,0 +1,141 @@
+name: release-please PR
+
+# Reusable workflow: open or update the release PR with release-please.
+#
+# Prototype, alongside (not replacing) the knope workflows. See the README
+# section "release-please" and `agent-choices.md` for the design.
+#
+# Meant for `workflow_dispatch` on the default branch. The caller needs:
+#
+#   permissions:
+#     contents: write
+#     pull-requests: write
+#     issues: write
+#
+# A called workflow can only narrow the caller's permissions, so a caller that
+# grants less fails here.
+#
+# release-please reads its config, manifest, and the history through the API,
+# so there is no checkout. It rewrites every file the config lists as an
+# extra-file (and the changelog and manifest) on the PR branch.
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: Path to the release-please config in the repository.
+        type: string
+        required: false
+        default: release-please-config.json
+      manifest-file:
+        description: Path to the release-please manifest in the repository.
+        type: string
+        required: false
+        default: .release-please-manifest.json
+      release-as:
+        description: >-
+          Force the next version (`X.Y.Z`, optionally with a prerelease suffix)
+          for this run only. Unlike the `release-as` config key, which sticks
+          until someone removes it, this does not outlive the dispatch.
+        type: string
+        required: false
+        default: ""
+      release-please-version:
+        description: Version of the release-please npm package to run.
+        type: string
+        required: false
+        default: "17.11.2"
+    secrets:
+      token:
+        description: >-
+          Token used to open the PR. A PAT or app token makes the PR's own
+          `pull_request` workflows run normally; the job's GITHUB_TOKEN works
+          but leaves them waiting for approval (see the README).
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      # Everything user-controlled reaches the script through env, never
+      # through ${{ }} interpolation into the script text.
+      - name: Validate context and inputs
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          MANIFEST_FILE: ${{ inputs.manifest-file }}
+          RELEASE_AS: ${{ inputs.release-as }}
+          RP_VERSION: ${{ inputs.release-please-version }}
+        run: |
+          set -euo pipefail
+          semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          path_re='^[A-Za-z0-9._/-]+$'
+          # The release PR targets the default branch; opening one from any
+          # other ref would version the wrong history.
+          if [[ -z "${DEFAULT_BRANCH}" ]]; then
+            echo "::error::Cannot tell the default branch from the event; dispatch this manually."
+            exit 1
+          fi
+          if [[ "${REF_TYPE}" != "branch" || "${REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error::Refusing to run on '${REF_NAME}'; dispatch on '${DEFAULT_BRANCH}'."
+            exit 1
+          fi
+          for p in "${CONFIG_FILE}" "${MANIFEST_FILE}"; do
+            if [[ ! "${p}" =~ ${path_re} || "${p}" == *..* ]]; then
+              echo "::error::Invalid path '${p}'."
+              exit 1
+            fi
+          done
+          if [[ ! "${RP_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release-please-version must be X.Y.Z, got '${RP_VERSION}'."
+            exit 1
+          fi
+          if [[ -n "${RELEASE_AS}" && ! "${RELEASE_AS}" =~ ${semver} ]]; then
+            echo "::error::release-as must be a semantic version, got '${RELEASE_AS}'."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      # `release-pr` is idempotent: it updates the open release PR if there is
+      # one, and does nothing when no releasable commit landed since the last
+      # release. Re-running is always safe.
+      - name: Create or update the release PR
+        env:
+          GH_TOKEN: ${{ secrets.token || github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          MANIFEST_FILE: ${{ inputs.manifest-file }}
+          RELEASE_AS: ${{ inputs.release-as }}
+          RP_VERSION: ${{ inputs.release-please-version }}
+        run: |
+          set -euo pipefail
+          args=(
+            release-pr
+            --token "${GH_TOKEN}"
+            --repo-url "${GITHUB_REPOSITORY}"
+            --target-branch "${DEFAULT_BRANCH}"
+            --config-file "${CONFIG_FILE}"
+            --manifest-file "${MANIFEST_FILE}"
+          )
+          if [[ -n "${RELEASE_AS}" ]]; then
+            args+=(--release-as "${RELEASE_AS}")
+          fi
+          npx --yes "release-please@${RP_VERSION}" "${args[@]}"
+          {
+            echo "### release-please"
+            echo
+            echo "Release PR created or updated, if there was anything to release."
+            echo "With the default GITHUB_TOKEN, its \`pull_request\` runs wait in"
+            echo "\`action_required\`: approve them, or close and reopen the PR."
+          } >>"${GITHUB_STEP_SUMMARY}"
