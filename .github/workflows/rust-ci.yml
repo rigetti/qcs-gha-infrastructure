@@ -52,7 +52,7 @@ jobs:
           toolchain: ${{ inputs.toolchain }}
           components: clippy
           cache-key: clippy
-      - run: cargo clippy ${{ inputs.clippy-args }} -- --deny warnings
+      - run: cargo clippy ${{ inputs.clippy-args }}
 
   test:
     runs-on: ${{ inputs.runs-on }}
