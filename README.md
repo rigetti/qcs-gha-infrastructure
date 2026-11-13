@@ -58,7 +58,7 @@ later trusted run would read.
 
 ### `rust-ci.yml`
 
-`cargo fmt --check`, `cargo clippy -- --deny warnings`, and the test suite
+`cargo fmt --check`, `cargo clippy`, and the test suite
 (`cargo nextest run` by default) as three parallel jobs.
 
 ```yaml
